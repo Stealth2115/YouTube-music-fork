@@ -41,44 +41,56 @@ fun MusicVisualizer(style: String, playing: Boolean, color: Color, modifier: Mod
             }
         }
     }
+    // Hoisted out of the draw phase: these were re-allocated on every single frame
+    // (a list of 42 floats, a Path and one Color per bar) which churned the heap at 60fps.
+    val drawColor = remember(color) { color.copy(alpha = 0.9f) }
+    val wavePath = remember { Path() }
+    val stroke = remember { Stroke(width = 4f, cap = StrokeCap.Round) }
+
     Canvas(modifier) {
-        val values = anims.map { it.value }
-        val n = values.size
+        val n = anims.size
         if (n == 0 || size.width <= 0f) return@Canvas
         val slot = size.width / n
         val barW = slot * 0.55f
+        val halfBarW = barW / 2
+        val corner = CornerRadius(halfBarW)
+        val height = size.height
         when (style) {
             "Wave" -> {
-                val path = Path()
-                values.forEachIndexed { i, v ->
+                wavePath.reset()
+                val halfHeight = height / 2
+                val amplitude = height * 0.8f
+                for (i in 0 until n) {
+                    val v = anims[i].value
                     val x = slot * i + slot / 2
                     val sign = if (i % 2 == 0) 1f else -1f
-                    val y = size.height / 2 + (v - 0.5f) * size.height * 0.8f * sign
-                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    val y = halfHeight + (v - 0.5f) * amplitude * sign
+                    if (i == 0) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
                 }
-                drawPath(path, color.copy(alpha = 0.9f), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                drawPath(wavePath, drawColor, style = stroke)
             }
             "Mirror" -> {
-                values.forEachIndexed { i, v ->
-                    val h = (v * size.height / 2).coerceAtLeast(2f)
+                val halfHeight = height / 2
+                for (i in 0 until n) {
+                    val h = (anims[i].value * halfHeight).coerceAtLeast(2f)
                     val x = slot * i + (slot - barW) / 2
                     drawRoundRect(
-                        color.copy(alpha = 0.9f),
-                        topLeft = Offset(x, size.height / 2 - h),
+                        drawColor,
+                        topLeft = Offset(x, halfHeight - h),
                         size = Size(barW, h * 2),
-                        cornerRadius = CornerRadius(barW / 2),
+                        cornerRadius = corner,
                     )
                 }
             }
             else -> {
-                values.forEachIndexed { i, v ->
-                    val h = (v * size.height).coerceAtLeast(3f)
+                for (i in 0 until n) {
+                    val h = (anims[i].value * height).coerceAtLeast(3f)
                     val x = slot * i + (slot - barW) / 2
                     drawRoundRect(
-                        color.copy(alpha = 0.9f),
-                        topLeft = Offset(x, size.height - h),
+                        drawColor,
+                        topLeft = Offset(x, height - h),
                         size = Size(barW, h),
-                        cornerRadius = CornerRadius(barW / 2),
+                        cornerRadius = corner,
                     )
                 }
             }

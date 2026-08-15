@@ -2,16 +2,19 @@ package com.agon.app.viewmodel
 
 import android.app.Application
 import android.content.Intent
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -20,16 +23,23 @@ import com.agon.app.data.ArtistInfo
 import com.agon.app.data.LyricLine
 import com.agon.app.data.MusicRepository
 import com.agon.app.data.Playlist
+import com.agon.app.data.SavedState
 import com.agon.app.data.Song
 import com.agon.app.data.UserPrefs
 import com.agon.app.data.toMediaItem
-import com.agon.app.player.AudioFxManager
+import com.agon.app.data.youtube.YouTubeUnavailableException
+import com.agon.app.data.youtube.YtAlbum
+import com.agon.app.data.youtube.YtArtist
+import com.agon.app.data.youtube.YtSearchResults
+import com.agon.app.data.youtube.YtTrack
+import com.agon.app.data.youtube.videoIdOf
 import com.agon.app.player.EqPresets
 import com.agon.app.player.PlaybackService
 import com.agon.app.player.PlayerHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,15 +52,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = UserPrefs(app)
     private val repo = MusicRepository(app)
     val player: ExoPlayer = PlayerHolder.get(app)
-    private val fx = AudioFxManager()
+    // Shared with the player singleton: a recreated ViewModel re-uses the effects that
+    // are already attached to the audio session instead of leaking native ones.
+    private val fx = PlayerHolder.audioFx()
     private val json = Json { ignoreUnknownKeys = true }
+    private val youtube = PlayerHolder.youTubeRepository()
 
     // ---------------- Library ----------------
     var songs by mutableStateOf<List<Song>>(emptyList()); private set
     var albums by mutableStateOf<List<Album>>(emptyList()); private set
     var artists by mutableStateOf<List<ArtistInfo>>(emptyList()); private set
     var isLoading by mutableStateOf(false); private set
-    private var songMap: Map<Long, Song> = emptyMap()
+    private var songMap by mutableStateOf<Map<Long, Song>>(emptyMap())
     private var libraryRequested = false
 
     // ---------------- User data ----------------
@@ -58,9 +71,42 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var playlists by mutableStateOf<List<Playlist>>(emptyList()); private set
     var recentIds by mutableStateOf<List<Long>>(emptyList()); private set
 
-    val recentSongs: List<Song> get() = recentIds.mapNotNull { songMap[it] }
-    val favoriteSongs: List<Song> get() = songs.filter { it.id in favorites }
-    fun songById(id: Long): Song? = songMap[id]
+    /**
+     * Bounded LRU of songs that don't come from MediaStore (YouTube results), so the
+     * queue, mini player and history can still resolve them by id. Held as snapshot
+     * state so derived values recompute when it changes.
+     */
+    private var remoteSongs by mutableStateOf<Map<Long, Song>>(emptyMap())
+
+    private fun resolveSong(id: Long): Song? = songMap[id] ?: remoteSongs[id]
+
+    private fun rememberRemote(list: List<Song>) {
+        val additions = list.filter { it.id !in songMap && it.id !in remoteSongs }
+        if (additions.isEmpty()) return
+        val updated = LinkedHashMap<Long, Song>(remoteSongs.size + additions.size)
+        updated.putAll(remoteSongs)
+        for (song in additions) updated[song.id] = song
+        // Keep the newest entries only, so long browsing sessions can't grow the heap.
+        remoteSongs = if (updated.size <= MAX_REMOTE_SONGS) updated else {
+            val trimmed = LinkedHashMap<Long, Song>(MAX_REMOTE_SONGS)
+            val drop = updated.size - MAX_REMOTE_SONGS
+            var i = 0
+            for ((key, value) in updated) {
+                if (i++ < drop) continue
+                trimmed[key] = value
+            }
+            trimmed
+        }
+    }
+
+    // Derived once per dependency change instead of re-filtering the whole library on
+    // every recomposition that reads these.
+    private val recentSongsState = derivedStateOf { recentIds.mapNotNull { resolveSong(it) } }
+    private val favoriteSongsState = derivedStateOf { songs.filter { it.id in favorites } }
+
+    val recentSongs: List<Song> get() = recentSongsState.value
+    val favoriteSongs: List<Song> get() = favoriteSongsState.value
+    fun songById(id: Long): Song? = resolveSong(id)
 
     // ---------------- Playback state ----------------
     var currentSong by mutableStateOf<Song?>(null); private set
@@ -147,29 +193,74 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             attachFx(audioSessionId)
         }
+
+        override fun onPlayerError(error: PlaybackException) {
+            handlePlaybackError(error)
+        }
+    }
+
+    /**
+     * Keeps playback alive when a streamed item can't be played (removed, private,
+     * region- or age-restricted, or an expired URL): reports it once and skips ahead
+     * instead of letting the player die.
+     */
+    private fun handlePlaybackError(error: PlaybackException) {
+        val failedId = player.currentMediaItem?.mediaId?.toLongOrNull()
+        val videoId = failedId?.let { resolveSong(it) }?.let(::videoIdOf)
+        if (videoId != null) youtube.invalidateStream(videoId)
+
+        val reason = generateSequence(error.cause) { it.cause }
+            .filterIsInstance<YouTubeUnavailableException>()
+            .firstOrNull()
+            ?.message
+
+        toast(reason ?: "Can't play this track \u2014 skipping")
+
+        if (player.hasNextMediaItem()) {
+            player.seekToNextMediaItem()
+            player.prepare()
+        } else {
+            player.pause()
+        }
     }
 
     init {
         player.addListener(listener)
         attachFx(player.audioSessionId)
         viewModelScope.launch { loadPrefs() }
-        // Position ticker
+        // Position ticker — only runs while something is actually playing, so an idle
+        // or paused app does no periodic work at all (battery + CPU).
         viewModelScope.launch {
-            while (isActive) {
-                if (player.playbackState != Player.STATE_IDLE) {
-                    positionMs = player.currentPosition.coerceAtLeast(0L)
-                    durationMs = player.duration.coerceAtLeast(0L)
+            snapshotFlow { isPlaying }.collectLatest { playing ->
+                // One immediate sync so the UI is correct the moment playback stops.
+                syncProgress()
+                if (!playing) return@collectLatest
+                while (isActive) {
+                    delay(500)
+                    syncProgress()
                 }
-                delay(500)
             }
         }
         // Periodic session save while playing
         viewModelScope.launch {
-            while (isActive) {
-                delay(10_000)
-                if (isPlaying) saveSession()
+            snapshotFlow { isPlaying }.collectLatest { playing ->
+                if (!playing) return@collectLatest
+                while (isActive) {
+                    delay(10_000)
+                    saveSession()
+                }
             }
         }
+    }
+
+    private fun syncProgress() {
+        if (player.playbackState == Player.STATE_IDLE) return
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val duration = player.duration.coerceAtLeast(0L)
+        // Only touch snapshot state when the value really changed: avoids waking up
+        // every observer (mini player, seek bar, lyrics) twice a second for nothing.
+        if (position != positionMs) positionMs = position
+        if (duration != durationMs) durationMs = duration
     }
 
     override fun onCleared() {
@@ -179,8 +270,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- Prefs ----------------
 
+    private var savedState: SavedState? = null
+
     private suspend fun loadPrefs() {
-        val s = prefs.load()
+        val s = prefs.load().also { savedState = it }
         favorites = s.favorites
         recentIds = s.recents
         playlists = runCatching { json.decodeFromString<List<Playlist>>(s.playlistsJson) }
@@ -222,14 +315,32 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             isLoading = true
             val loaded = repo.loadSongs()
+            // Grouping and sorting the whole library is O(n log n) work — keep it off
+            // the main thread so a big library never janks the first frame.
+            val indexed = withContext(Dispatchers.Default) {
+                val map = HashMap<Long, Song>(loaded.size * 2)
+                val byAlbum = LinkedHashMap<Long, MutableList<Song>>()
+                val byArtist = LinkedHashMap<String, MutableList<Song>>()
+                for (song in loaded) {
+                    map[song.id] = song
+                    byAlbum.getOrPut(song.albumId) { ArrayList(12) }.add(song)
+                    byArtist.getOrPut(song.artist) { ArrayList(12) }.add(song)
+                }
+                val albumList = byAlbum.map { (id, ss) ->
+                    val first = ss[0]
+                    Album(id, first.album, first.artist, ss.size, first.artUri)
+                }.sortedBy { it.name.lowercase() }
+                val artistList = byArtist.map { (name, ss) ->
+                    val albumIds = HashSet<Long>(ss.size)
+                    for (song in ss) albumIds.add(song.albumId)
+                    ArtistInfo(name, ss.size, albumIds.size)
+                }.sortedBy { it.name.lowercase() }
+                LibraryIndex(map, albumList, artistList)
+            }
             songs = loaded
-            songMap = loaded.associateBy { it.id }
-            albums = loaded.groupBy { it.albumId }
-                .map { (id, ss) -> Album(id, ss.first().album, ss.first().artist, ss.size, ss.first().artUri) }
-                .sortedBy { it.name.lowercase() }
-            artists = loaded.groupBy { it.artist }
-                .map { (name, ss) -> ArtistInfo(name, ss.size, ss.map { it.albumId }.distinct().size) }
-                .sortedBy { it.name.lowercase() }
+            songMap = indexed.byId
+            albums = indexed.albums
+            artists = indexed.artists
             isLoading = false
             if (restore && resumeSession) restoreSession()
             refreshCurrent()
@@ -237,12 +348,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private class LibraryIndex(
+        val byId: Map<Long, Song>,
+        val albums: List<Album>,
+        val artists: List<ArtistInfo>,
+    )
+
     // ---------------- Session persistence ----------------
 
     private suspend fun restoreSession() {
         if (player.mediaItemCount > 0) return
-        val s = prefs.load()
-        val items = s.queueIds.mapNotNull { songMap[it] }
+        // Reuse the state read at startup instead of paying for a second DataStore read.
+        val s = savedState ?: prefs.load().also { savedState = it }
+        val items = s.queueIds.mapNotNull { resolveSong(it) }
         if (items.isEmpty()) return
         val idx = s.queueIndex.coerceIn(0, items.lastIndex)
         player.setMediaItems(items.map { it.toMediaItem() }, idx, s.queuePos.coerceAtLeast(0L))
@@ -252,13 +370,23 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         player.prepare()
     }
 
+    private var lastSavedSession: Int = 0
+
     private fun saveSession() {
-        if (player.mediaItemCount == 0) return
-        val ids = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        val count = player.mediaItemCount
+        if (count == 0) return
+        val ids = ArrayList<Long>(count)
+        for (i in 0 until count) player.getMediaItemAt(i).mediaId.toLongOrNull()?.let(ids::add)
         val idx = player.currentMediaItemIndex
         val pos = player.currentPosition.coerceAtLeast(0L)
         val sh = player.shuffleModeEnabled
         val rp = player.repeatMode
+        // Skip the write when nothing meaningful changed (position is bucketed to 5s):
+        // fewer disk writes means less I/O and better battery life.
+        val fingerprint = (((ids.hashCode() * 31 + idx) * 31 + (pos / 5_000L).toInt()) * 31 +
+            (if (sh) 1 else 0)) * 31 + rp
+        if (fingerprint == lastSavedSession) return
+        lastSavedSession = fingerprint
         viewModelScope.launch { prefs.saveSession(ids, idx, pos, sh, rp) }
     }
 
@@ -266,6 +394,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playSongs(list: List<Song>, startIndex: Int = 0, shuffled: Boolean = false) {
         if (list.isEmpty()) return
+        rememberRemote(list)
         player.setMediaItems(list.map { it.toMediaItem() }, startIndex.coerceIn(0, list.lastIndex), 0L)
         player.shuffleModeEnabled = shuffled
         player.prepare()
@@ -330,6 +459,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun addToQueue(song: Song) {
         if (player.mediaItemCount == 0) playSongs(listOf(song))
         else {
+            rememberRemote(listOf(song))
             player.addMediaItem(song.toMediaItem())
             toast("Added to queue")
         }
@@ -338,6 +468,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun playNextSong(song: Song) {
         if (player.mediaItemCount == 0) playSongs(listOf(song))
         else {
+            rememberRemote(listOf(song))
             player.addMediaItem(player.currentMediaItemIndex + 1, song.toMediaItem())
             toast("Playing next")
         }
@@ -462,14 +593,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun playlistSongs(p: Playlist): List<Song> = p.songIds.mapNotNull { songMap[it] }
+    fun playlistSongs(p: Playlist): List<Song> = p.songIds.mapNotNull { resolveSong(it) }
 
     // ---------------- History ----------------
 
     private fun recordRecent() {
         val id = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
-        recentIds = (listOf(id) + recentIds.filter { it != id }).take(50)
-        viewModelScope.launch { prefs.saveRecents(recentIds) }
+        if (recentIds.firstOrNull() == id) return // already on top: nothing to write
+        val updated = ArrayList<Long>(minOf(recentIds.size + 1, 50))
+        updated.add(id)
+        for (existing in recentIds) {
+            if (updated.size >= 50) break
+            if (existing != id) updated.add(existing)
+        }
+        recentIds = updated
+        viewModelScope.launch { prefs.saveRecents(updated) }
     }
 
     fun clearHistory() {
@@ -671,22 +809,109 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { prefs.saveResume(enabled) }
     }
 
+    // ---------------- YouTube Music ----------------
+
+    var ytQuery by mutableStateOf(""); private set
+    var ytResults by mutableStateOf(YtSearchResults.EMPTY); private set
+    var ytSearching by mutableStateOf(false); private set
+    var ytError by mutableStateOf<String?>(null); private set
+    private var ytLoadingCollection = false
+
+    private var ytSearchJob: Job? = null
+
+    fun updateYtQuery(query: String) {
+        ytQuery = query
+        val trimmed = query.trim()
+        ytSearchJob?.cancel()
+        if (trimmed.length < 2) {
+            ytResults = YtSearchResults.EMPTY
+            ytSearching = false
+            ytError = null
+            return
+        }
+        ytSearching = true
+        ytError = null
+        ytSearchJob = viewModelScope.launch {
+            delay(350) // debounce: one request per pause in typing, not per keystroke
+            val results = runCatching { youtube.search(trimmed) }.getOrNull()
+            if (results == null) {
+                ytResults = YtSearchResults.EMPTY
+                ytError = "Couldn't reach YouTube Music"
+            } else {
+                ytResults = results
+                ytError = if (results.isEmpty) "No results on YouTube Music" else null
+            }
+            ytSearching = false
+        }
+    }
+
+    fun clearYtSearch() {
+        ytSearchJob?.cancel()
+        ytQuery = ""
+        ytResults = YtSearchResults.EMPTY
+        ytSearching = false
+        ytError = null
+    }
+
+    /** Plays a YouTube result through the existing player, keeping the rest of the list as the queue. */
+    fun playYtTrack(track: YtTrack, context: List<YtTrack> = listOf(track)) {
+        val source = if (context.isEmpty()) listOf(track) else context
+        val index = source.indexOfFirst { it.videoId == track.videoId }.coerceAtLeast(0)
+        playSongs(source.map(YtTrack::toSong), index)
+    }
+
+    fun queueYtTrack(track: YtTrack) = addToQueue(track.toSong())
+
+    fun playYtTrackNext(track: YtTrack) = playNextSong(track.toSong())
+
+    fun playYtAlbum(album: YtAlbum) {
+        loadYtCollection(album.title) { youtube.albumTracks(album.browseId, album.thumbnailUrl) }
+    }
+
+    fun playYtArtist(artist: YtArtist) {
+        loadYtCollection(artist.name) { youtube.artistTracks(artist.browseId, artist.thumbnailUrl) }
+    }
+
+    private fun loadYtCollection(label: String, load: suspend () -> List<YtTrack>) {
+        if (ytLoadingCollection) return
+        ytLoadingCollection = true
+        viewModelScope.launch {
+            val tracks = runCatching { load() }.getOrDefault(emptyList())
+            ytLoadingCollection = false
+            if (tracks.isEmpty()) toast("Nothing playable in $label")
+            else playSongs(tracks.map(YtTrack::toSong))
+        }
+    }
+
     // ---------------- Internal ----------------
 
     private fun refreshCurrent() {
-        currentSong = player.currentMediaItem?.mediaId?.toLongOrNull()?.let { songMap[it] }
+        val song = player.currentMediaItem?.mediaId?.toLongOrNull()?.let { resolveSong(it) }
+        if (song?.id != currentSong?.id) currentSong = song
         positionMs = player.currentPosition.coerceAtLeast(0L)
         durationMs = player.duration.coerceAtLeast(0L)
-        queueIndex = player.currentMediaItemIndex
+        val index = player.currentMediaItemIndex
+        if (index != queueIndex) queueIndex = index
     }
 
     private fun syncQueue() {
         val n = player.mediaItemCount
-        queue = (0 until n).mapNotNull { i ->
-            player.getMediaItemAt(i).mediaId.toLongOrNull()?.let { songMap[it] }
+        val next = ArrayList<Song>(n)
+        for (i in 0 until n) {
+            player.getMediaItemAt(i).mediaId.toLongOrNull()?.let { id -> resolveSong(id)?.let(next::add) }
         }
-        queueIndex = player.currentMediaItemIndex
+        // Only publish a new list when the contents actually changed, so the queue
+        // sheet and every other observer don't recompose on unrelated timeline events.
+        if (!sameSongs(queue, next)) queue = next
+        val index = player.currentMediaItemIndex
+        if (index != queueIndex) queueIndex = index
         if (currentSong == null) refreshCurrent()
+    }
+
+    private fun sameSongs(a: List<Song>, b: List<Song>): Boolean {
+        if (a.size != b.size) return false
+        for (i in a.indices) if (a[i].id != b[i].id) return false
+        return true
     }
 
     private fun startService() {
@@ -694,5 +919,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             ctx.startService(Intent(ctx, PlaybackService::class.java))
         }
+    }
+
+    private companion object {
+        /** Upper bound on cached non-MediaStore songs; ~300 entries is a few hundred KB. */
+        const val MAX_REMOTE_SONGS = 300
     }
 }

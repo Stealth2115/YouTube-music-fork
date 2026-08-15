@@ -57,7 +57,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.ui:ui-tooling-preview")
 
     implementation("androidx.activity:activity-compose:1.12.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
@@ -68,6 +67,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
 
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
+    // Required at runtime so Coil can load remote (YouTube) artwork over https.
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
@@ -76,6 +76,8 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-session:1.8.0")
+    // Used directly for the YouTube stream-resolving data source.
+    implementation("androidx.media3:media3-datasource:1.8.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -32,6 +32,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,9 +54,10 @@ import com.agon.app.ui.components.PlaylistTargetDialog
 import com.agon.app.ui.components.SectionHeader
 import com.agon.app.ui.components.SongCollectionSheet
 import com.agon.app.ui.components.VmSongRow
+import com.agon.app.ui.components.YouTubeResults
 import com.agon.app.viewmodel.PlayerViewModel
 
-private val categories = listOf("All", "Songs", "Albums", "Artists", "Playlists")
+private val categories = listOf("All", "Songs", "Albums", "Artists", "Playlists", "YouTube")
 
 @Composable
 fun SearchScreen(vm: PlayerViewModel, onOpenPlaylist: (Long) -> Unit) {
@@ -65,6 +68,14 @@ fun SearchScreen(vm: PlayerViewModel, onOpenPlaylist: (Long) -> Unit) {
     var playlistTarget by remember { mutableStateOf<Song?>(null) }
 
     val q = query.trim()
+    val youtubeTab = category == "YouTube"
+
+    // Only the YouTube tab talks to the network, and only while it is visible.
+    LaunchedEffect(youtubeTab, q) {
+        if (youtubeTab) vm.updateYtQuery(q) else vm.clearYtSearch()
+    }
+    DisposableEffect(Unit) { onDispose { vm.clearYtSearch() } }
+
     val songResults = remember(q, vm.songs) {
         if (q.isBlank()) emptyList()
         else vm.songs.filter { it.title.contains(q, true) || it.artist.contains(q, true) || it.album.contains(q, true) }
@@ -111,6 +122,7 @@ fun SearchScreen(vm: PlayerViewModel, onOpenPlaylist: (Long) -> Unit) {
             }
         }
         when {
+            youtubeTab -> YouTubeResults(vm, q)
             q.isBlank() -> EmptyState(
                 Icons.Default.Search,
                 "Search your library",
