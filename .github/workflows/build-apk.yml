@@ -52,3 +52,5 @@ jobs:
           name: Redline-Music-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # CI-only build infrastructure; application source is unchanged.
