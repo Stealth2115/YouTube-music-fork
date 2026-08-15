@@ -534,7 +534,7 @@ private fun VolumeSheet(vm: PlayerViewModel, onDismiss: () -> Unit) {
                 Icon(Icons.AutoMirrored.Filled.VolumeDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Slider(
                     value = vm.volume,
-                    onValueChange = { vm.setVolume(it) },
+                    onValueChange = { vm.updateVolume(it) },
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     colors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,

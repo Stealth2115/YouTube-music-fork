@@ -130,7 +130,7 @@ fun SettingsScreen(vm: PlayerViewModel, onOpenEqualizer: () -> Unit) {
                     trailing = {
                         Switch(
                             checked = vm.resumeSession,
-                            onCheckedChange = { vm.setResumeSession(it) },
+                            onCheckedChange = { vm.updateResumeSession(it) },
                             colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
                         )
                     },

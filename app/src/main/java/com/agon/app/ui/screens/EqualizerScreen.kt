@@ -59,7 +59,7 @@ fun EqualizerScreen(vm: PlayerViewModel, onBack: () -> Unit) {
             )
             Switch(
                 checked = vm.eqEnabled,
-                onCheckedChange = { vm.setEqEnabled(it) },
+                onCheckedChange = { vm.updateEqEnabled(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.padding(end = 12.dp),
             )

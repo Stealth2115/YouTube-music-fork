@@ -518,7 +518,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         persistAudio()
     }
 
-    fun setVolume(v: Float) {
+    fun updateVolume(v: Float) {
         volume = v.coerceIn(0f, 1f)
         player.volume = volume
         persistAudio()
@@ -657,7 +657,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setEqEnabled(enabled: Boolean) {
+    fun updateEqEnabled(enabled: Boolean) {
         eqEnabled = enabled
         if (fxAvailable) {
             fx.setEnabled(enabled)
@@ -804,7 +804,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { prefs.saveLook(accentName, bgName, visualizerStyle) }
     }
 
-    fun setResumeSession(enabled: Boolean) {
+    fun updateResumeSession(enabled: Boolean) {
         resumeSession = enabled
         viewModelScope.launch { prefs.saveResume(enabled) }
     }
