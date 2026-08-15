@@ -91,8 +91,9 @@ class YouTubeRepository {
         }
 
         var lastReason = "This track can't be played"
-        for (fallback in booleanArrayOf(false, true)) {
-            val response = InnerTube.player(videoId, fallback) ?: continue
+        var gotAnyResponse = false
+        for (response in InnerTube.playerResponses(videoId)) {
+            gotAnyResponse = true
             val status = response.obj("playabilityStatus")
             val state = status.str("status")
             if (state != null && state != "OK") {
@@ -104,6 +105,7 @@ class YouTubeRepository {
             streamCache.put(videoId, success)
             return success
         }
+        if (!gotAnyResponse) lastReason = "Couldn't reach YouTube"
         return StreamResult.Unavailable(lastReason)
     }
 

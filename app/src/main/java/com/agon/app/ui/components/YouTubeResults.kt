@@ -108,7 +108,7 @@ fun YouTubeResults(vm: PlayerViewModel, query: String) {
  * search tab while the query is empty, giving quick access to the user's own music.
  */
 @Composable
-private fun YouTubeLibrary(vm: PlayerViewModel) {
+fun YouTubeLibrary(vm: PlayerViewModel) {
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "ytlib-head") {
             Row(

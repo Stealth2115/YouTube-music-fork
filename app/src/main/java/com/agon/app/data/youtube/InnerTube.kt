@@ -35,14 +35,24 @@ internal object InnerTube {
             "Chrome/129.0.0.0 Safari/537.36"
 
     private const val ANDROID_VR_NAME = "ANDROID_VR"
-    private const val ANDROID_VR_VERSION = "1.60.19"
+    private const val ANDROID_VR_VERSION = "1.65.10"
     private const val ANDROID_VR_UA =
-        "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12; en_US; " +
-            "Quest 3 Build/SQ3A.220605.009.A1) gzip"
+        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; " +
+            "eureka-user Build/SQ3A.220605.009.A1) gzip"
 
     private const val IOS_NAME = "IOS"
-    private const val IOS_VERSION = "20.03.02"
-    private const val IOS_UA = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X; en_US)"
+    private const val IOS_VERSION = "21.26.4"
+    private const val IOS_UA = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+
+    // visionOS is the client YouTube serves to the Apple Vision Pro. It returns plain,
+    // un-ciphered progressive stream URLs and - unlike the Android/iOS/web clients - does
+    // not require a proof-of-origin token, which makes it the most reliable client for
+    // anonymous playback. It mirrors yt-dlp's default player client order.
+    private const val VISIONOS_NAME = "VISIONOS"
+    private const val VISIONOS_VERSION = "1.02"
+    private const val VISIONOS_UA =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
+            "(KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     private const val CONNECT_TIMEOUT_MS = 12_000
     private const val READ_TIMEOUT_MS = 15_000
@@ -75,7 +85,7 @@ internal object InnerTube {
             put("deviceMake", "Oculus")
             put("deviceModel", "Quest 3")
             put("osName", "Android")
-            put("osVersion", "12")
+            put("osVersion", "12L")
             put("androidSdkVersion", 32)
             put("hl", "en")
             put("gl", "US")
@@ -90,10 +100,24 @@ internal object InnerTube {
             put("deviceMake", "Apple")
             put("deviceModel", "iPhone16,2")
             put("osName", "iPhone")
-            put("osVersion", "18.2.1.22C161")
+            put("osVersion", "18.3.2.22D82")
             put("hl", "en")
             put("gl", "US")
             put("userAgent", IOS_UA)
+        }
+    }
+
+    private fun visionOsContext(): JsonObject = buildJsonObject {
+        putJsonObject("client") {
+            put("clientName", VISIONOS_NAME)
+            put("clientVersion", VISIONOS_VERSION)
+            put("deviceMake", "Apple")
+            put("deviceModel", "RealityDevice17,1")
+            put("osName", "visionOS")
+            put("osVersion", "26.5.23O471")
+            put("hl", "en")
+            put("gl", "US")
+            put("userAgent", VISIONOS_UA)
         }
     }
 
@@ -132,22 +156,44 @@ internal object InnerTube {
         return post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true, authToken = authToken)
     }
 
+    private data class PlayerClient(
+        val name: String,
+        val version: String,
+        val headerClientName: String,
+        val userAgent: String,
+        val context: () -> JsonObject,
+    )
+
+    /** Player clients tried in priority order; the first one yielding a playable URL wins. */
+    private val PLAYER_CLIENTS = listOf(
+        PlayerClient(VISIONOS_NAME, VISIONOS_VERSION, "101", VISIONOS_UA, ::visionOsContext),
+        PlayerClient(ANDROID_VR_NAME, ANDROID_VR_VERSION, "28", ANDROID_VR_UA, ::androidVrContext),
+        PlayerClient(IOS_NAME, IOS_VERSION, "5", IOS_UA, ::iosContext),
+    )
+
     /**
-     * Player endpoint. The ANDROID_VR client returns plain, un-ciphered progressive
-     * stream URLs; IOS is used as a fallback when a track is not offered to it.
+     * Player endpoint. Returns the raw InnerTube responses in priority order; the caller
+     * walks the list and uses the first response with a playable audio URL. visionOS is
+     * tried first because it returns plain, un-ciphered progressive stream URLs without
+     * requiring a proof-of-origin token or JavaScript signature deciphering.
      */
-    fun player(videoId: String, useFallbackClient: Boolean): JsonObject? {
-        val ctx = if (useFallbackClient) iosContext() else androidVrContext()
-        val name = if (useFallbackClient) IOS_NAME else ANDROID_VR_NAME
-        val version = if (useFallbackClient) IOS_VERSION else ANDROID_VR_VERSION
-        val ua = if (useFallbackClient) IOS_UA else ANDROID_VR_UA
-        val body = buildJsonObject {
-            put("context", ctx)
-            put("videoId", videoId)
-            put("contentCheckOk", true)
-            put("racyCheckOk", true)
+    fun playerResponses(videoId: String): List<JsonObject> {
+        val out = ArrayList<JsonObject>(PLAYER_CLIENTS.size)
+        for (client in PLAYER_CLIENTS) {
+            val body = buildJsonObject {
+                put("context", client.context())
+                put("videoId", videoId)
+                putJsonObject("playbackContext") {
+                    putJsonObject("contentPlaybackContext") {
+                        put("html5Preference", "HTML5_PREF_WANTS")
+                    }
+                }
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            }
+            postPlayer(YT_BASE + "player?prettyPrint=false", body, client)?.let(out::add)
         }
-        return post(YT_BASE + "player?prettyPrint=false", body, name, version, ua, music = false)
+        return out
     }
 
     private fun post(
@@ -187,6 +233,46 @@ internal object InnerTube {
                     setRequestProperty("Origin", "https://music.youtube.com")
                     setRequestProperty("Referer", "https://music.youtube.com/")
                 }
+            }
+            conn.outputStream.use { it.write(payload) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                conn.errorStream?.use { it.readBounded() }
+                return null
+            }
+            val text = conn.decodedStream().use { it.readBounded() }
+            json.parseToJsonElement(text) as? JsonObject
+        } catch (_: IOException) {
+            null
+        } catch (_: RuntimeException) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    /** POST used by [playerResponses]: per-client numeric name, user agent and YouTube origin. */
+    private fun postPlayer(url: String, body: JsonObject, client: PlayerClient): JsonObject? {
+        var conn: HttpURLConnection? = null
+        return try {
+            val payload = body.toString().toByteArray(Charsets.UTF_8)
+            conn = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                doOutput = true
+                instanceFollowRedirects = true
+                setFixedLengthStreamingMode(payload.size)
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Accept-Encoding", "gzip")
+                setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+                setRequestProperty("User-Agent", client.userAgent)
+                setRequestProperty("X-Goog-Api-Format-Version", "1")
+                setRequestProperty("X-YouTube-Client-Name", client.headerClientName)
+                setRequestProperty("X-YouTube-Client-Version", client.version)
+                setRequestProperty("Origin", "https://www.youtube.com")
+                setRequestProperty("Referer", "https://www.youtube.com/")
             }
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode

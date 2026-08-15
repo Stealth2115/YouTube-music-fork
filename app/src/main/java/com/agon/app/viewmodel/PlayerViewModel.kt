@@ -190,6 +190,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var lyrics by mutableStateOf<List<LyricLine>?>(null); private set
     private var lyricsForSongId: Long = -1L
 
+    /** Consecutive playback errors, used to stop auto-skipping after a run of broken items. */
+    private var consecutivePlaybackErrors = 0
+
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
@@ -197,6 +200,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            consecutivePlaybackErrors = 0
             refreshCurrent()
             if (stopAfterCurrent && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 player.pause()
@@ -205,7 +209,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (player.playWhenReady) recordRecent()
         }
-
         override fun onEvents(p: Player, events: Player.Events) {
             if (events.containsAny(
                     Player.EVENT_TIMELINE_CHANGED,
@@ -221,7 +224,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) durationMs = player.duration.coerceAtLeast(0L)
+            if (playbackState == Player.STATE_READY) {
+                consecutivePlaybackErrors = 0
+                durationMs = player.duration.coerceAtLeast(0L)
+            }
         }
 
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -236,7 +242,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Keeps playback alive when a streamed item can't be played (removed, private,
      * region- or age-restricted, or an expired URL): reports it once and skips ahead
-     * instead of letting the player die.
+     * instead of letting the player die. Auto-advancing is capped so a run of broken
+     * items stops instead of silently skipping through the whole queue forever.
      */
     private fun handlePlaybackError(error: PlaybackException) {
         val failedId = player.currentMediaItem?.mediaId?.toLongOrNull()
@@ -248,13 +255,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             .firstOrNull()
             ?.message
 
-        toast(reason ?: "Can't play this track \u2014 skipping")
-
-        if (player.hasNextMediaItem()) {
+        consecutivePlaybackErrors++
+        val canAdvance = player.hasNextMediaItem() && consecutivePlaybackErrors < MAX_AUTO_SKIPS
+        if (canAdvance) {
+            toast(reason ?: "Can't play this track \u2014 skipping")
             player.seekToNextMediaItem()
             player.prepare()
         } else {
+            consecutivePlaybackErrors = 0
             player.pause()
+            toast(reason ?: "Playback failed")
         }
     }
 
@@ -977,11 +987,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 toast("Signed out \u2014 please sign in again")
                 return@launch
             }
-            val liked = runCatching { youtube.likedSongs(token) }.getOrDefault(emptyList())
-            val playlists = runCatching { youtube.libraryPlaylists(token) }.getOrDefault(emptyList())
+            var failed = false
+            val liked = runCatching { youtube.likedSongs(token) }
+                .onFailure { failed = true }
+                .getOrDefault(emptyList())
+            val playlists = runCatching { youtube.libraryPlaylists(token) }
+                .onFailure { failed = true }
+                .getOrDefault(emptyList())
             ytLikedSongs = liked
             ytPlaylists = playlists
             ytLibraryLoading = false
+            if (failed) toast("Couldn't load your YouTube Music library")
         }
     }
 
@@ -1082,5 +1098,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** Upper bound on cached non-MediaStore songs; ~300 entries is a few hundred KB. */
         const val MAX_REMOTE_SONGS = 300
+
+        /** Stop auto-advancing after this many consecutive playback failures. */
+        const val MAX_AUTO_SKIPS = 3
     }
 }

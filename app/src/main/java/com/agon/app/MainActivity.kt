@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -65,6 +66,7 @@ import com.agon.app.ui.screens.PlaylistDetailScreen
 import com.agon.app.ui.screens.PlaylistsScreen
 import com.agon.app.ui.screens.SearchScreen
 import com.agon.app.ui.screens.SettingsScreen
+import com.agon.app.ui.screens.YouTubeMusicScreen
 import com.agon.app.ui.theme.AgonAppTheme
 import com.agon.app.viewmodel.PlayerViewModel
 
@@ -103,6 +105,7 @@ private data class NavDest(val route: String, val label: String, val icon: Image
 
 private val destinations = listOf(
     NavDest("home", "Home", Icons.Default.Home),
+    NavDest("youtube", "YouTube", Icons.Default.SmartDisplay),
     NavDest("library", "Library", Icons.Default.LibraryMusic),
     NavDest("playlists", "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
     NavDest("search", "Search", Icons.Default.Search),
@@ -152,6 +155,7 @@ fun MainScaffold(vm: PlayerViewModel) {
                         onOpenPlaylist = { nav.navigate("playlist/$it") },
                     )
                 }
+                composable("youtube") { YouTubeMusicScreen(vm) }
                 composable("library") { LibraryScreen(vm) }
                 composable("playlists") {
                     PlaylistsScreen(vm, onOpenPlaylist = { nav.navigate("playlist/$it") })

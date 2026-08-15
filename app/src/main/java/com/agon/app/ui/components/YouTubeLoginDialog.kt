@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +45,13 @@ fun YouTubeLoginDialog(vm: PlayerViewModel) {
     val url = vm.ytLoginUrl ?: "https://www.google.com/device"
     val code = vm.ytLoginCode.orEmpty()
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+
+    // Open the browser automatically so the user only has to type the code.
+    LaunchedEffect(code) {
+        if (code.isNotEmpty()) {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = { vm.cancelYtLogin() },
