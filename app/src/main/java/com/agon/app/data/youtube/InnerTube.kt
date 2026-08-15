@@ -119,6 +119,20 @@ internal object InnerTube {
     }
 
     /**
+     * Authenticated browse for the signed-in account's library (liked songs, saved
+     * playlists, …). Uses the account's OAuth access token and omits the public web
+     * client key, matching how the official web client sends personalised requests.
+     */
+    fun browseAuthed(browseId: String, authToken: String): JsonObject? {
+        val body = buildJsonObject {
+            put("context", musicContext())
+            put("browseId", browseId)
+        }
+        val url = MUSIC_BASE + "browse?prettyPrint=false"
+        return post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true, authToken = authToken)
+    }
+
+    /**
      * Player endpoint. The ANDROID_VR client returns plain, un-ciphered progressive
      * stream URLs; IOS is used as a fallback when a track is not offered to it.
      */
@@ -143,6 +157,7 @@ internal object InnerTube {
         clientVersion: String,
         userAgent: String,
         music: Boolean,
+        authToken: String? = null,
     ): JsonObject? {
         var conn: HttpURLConnection? = null
         return try {
@@ -164,6 +179,10 @@ internal object InnerTube {
                 setRequestProperty("X-Goog-Api-Format-Version", "1")
                 setRequestProperty("X-YouTube-Client-Name", clientName)
                 setRequestProperty("X-YouTube-Client-Version", clientVersion)
+                if (authToken != null) {
+                    setRequestProperty("Authorization", "Bearer $authToken")
+                    setRequestProperty("X-Goog-AuthUser", "0")
+                }
                 if (music) {
                     setRequestProperty("Origin", "https://music.youtube.com")
                     setRequestProperty("Referer", "https://music.youtube.com/")

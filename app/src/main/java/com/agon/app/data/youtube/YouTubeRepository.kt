@@ -51,6 +51,34 @@ class YouTubeRepository {
     suspend fun artistTracks(browseId: String, fallbackArtwork: String): List<YtTrack> =
         albumTracks(browseId, fallbackArtwork)
 
+    /** Liked songs of the signed-in account. */
+    suspend fun likedSongs(authToken: String, limit: Int = 200): List<YtTrack> =
+        withContext(Dispatchers.IO) {
+            val response = InnerTube.browseAuthed("LM", authToken) ?: return@withContext emptyList()
+            parseTracks(response, limit)
+        }
+
+    /** Playlists saved in the signed-in account's library. */
+    suspend fun libraryPlaylists(authToken: String, limit: Int = 100): List<YtPlaylist> =
+        withContext(Dispatchers.IO) {
+            val response = InnerTube.browseAuthed("FEmusic_liked_playlists", authToken)
+                ?: return@withContext emptyList()
+            parsePlaylists(response, limit)
+        }
+
+    /** Tracks of a saved library playlist. */
+    suspend fun libraryPlaylistTracks(
+        authToken: String,
+        browseId: String,
+        fallbackArtwork: String,
+        limit: Int = 200,
+    ): List<YtTrack> = withContext(Dispatchers.IO) {
+        val response = InnerTube.browseAuthed(browseId, authToken) ?: return@withContext emptyList()
+        parseTracks(response, limit).map {
+            if (it.thumbnailUrl.isEmpty()) it.copy(thumbnailUrl = fallbackArtwork) else it
+        }
+    }
+
     /**
      * Resolves a playable, progressive audio stream URL for [videoId].
      * Blocking network call — always invoke from a background thread.
@@ -210,6 +238,23 @@ class YouTubeRepository {
                     thumbnailUrl = item.bestThumbnail(),
                 )
             )
+        }
+        return out
+    }
+
+    private fun parsePlaylists(response: JsonObject, limit: Int): List<YtPlaylist> {
+        val items = response.collectRenderers("musicResponsiveListItemRenderer", limit * 2)
+        val out = ArrayList<YtPlaylist>(minOf(items.size, limit))
+        val seen = HashSet<String>(items.size)
+        for (item in items) {
+            if (out.size >= limit) break
+            val browseId = item.browseId()?.takeIf { it.startsWith("VL") || it.startsWith("RD") } ?: continue
+            if (!seen.add(browseId)) continue
+            val columns = item.arr("flexColumns").orEmpty()
+            val title = columns.columnText(0) ?: continue
+            val meta = columns.columnRuns(1).filter { !it.isSeparator() }
+            val trackCount = meta.firstOrNull { it.contains("song", ignoreCase = true) }?.trim().orEmpty()
+            out.add(YtPlaylist(browseId, title, trackCount, item.bestThumbnail()))
         }
         return out
     }

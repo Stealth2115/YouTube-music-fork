@@ -15,14 +15,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -54,11 +58,16 @@ import com.agon.app.viewmodel.PlayerViewModel
 fun YouTubeResults(vm: PlayerViewModel, query: String) {
     val results = vm.ytResults
     when {
-        query.length < 2 -> EmptyState(
-            Icons.Default.Search,
-            "Search YouTube Music",
-            "Find songs, artists and albums from YouTube and play them right here.",
-        )
+        query.length < 2 -> {
+            if (vm.ytSignedIn) YouTubeLibrary(vm)
+            else EmptyState(
+                Icons.Default.Search,
+                "Search YouTube Music",
+                "Find songs, artists and albums from YouTube and play them right here.",
+                actionLabel = "Sign in with Google",
+                onAction = vm::startYtLogin,
+            )
+        }
         vm.ytSearching && results.isEmpty -> LoadingState("Searching YouTube Music\u2026")
         results.isEmpty -> EmptyState(
             Icons.Default.SearchOff,
@@ -91,6 +100,130 @@ fun YouTubeResults(vm: PlayerViewModel, query: String) {
             }
             item(key = "yt-foot") { Spacer(Modifier.height(16.dp)) }
         }
+    }
+}
+
+/**
+ * Signed-in account library: liked songs + saved playlists. Shown in the YouTube
+ * search tab while the query is empty, giving quick access to the user's own music.
+ */
+@Composable
+private fun YouTubeLibrary(vm: PlayerViewModel) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        item(key = "ytlib-head") {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    "Your library",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = vm::refreshYtLibrary, enabled = !vm.ytLibraryLoading) {
+                    Icon(Icons.Default.Refresh, "Refresh", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        if (vm.ytLibraryLoading) {
+            item(key = "ytlib-loading") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Loading your library\u2026",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (vm.ytLikedSongs.isNotEmpty()) {
+            item(key = "ytlib-liked") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { vm.playYtLikedSongs() }.padding(horizontal = 16.dp, vertical = 6.dp),
+                ) {
+                    Box(
+                        Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Favorite, "Liked songs", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Liked songs",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${vm.ytLikedSongs.size} songs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(Icons.Default.PlayArrow, "Play liked songs", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        if (vm.ytPlaylists.isNotEmpty()) {
+            item(key = "ytlib-pl-header") { SectionHeader("Playlists") }
+            items(vm.ytPlaylists, key = { "ytpl${it.browseId}" }) { playlist ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { vm.playYtPlaylist(playlist) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                ) {
+                    Artwork(playlist.thumbnailUrl, Modifier.size(48.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            playlist.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            playlist.trackCount.ifBlank { "Playlist" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    Icon(Icons.Default.PlayArrow, "Play playlist", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        if (!vm.ytLibraryLoading && vm.ytLikedSongs.isEmpty() && vm.ytPlaylists.isEmpty()) {
+            item(key = "ytlib-empty") {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Favorite, null,
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("Your library is empty", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Like songs or save playlists on YouTube Music and they'll show up here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        item(key = "ytlib-foot") { Spacer(Modifier.height(16.dp)) }
     }
 }
 

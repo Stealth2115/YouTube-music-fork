@@ -65,6 +65,14 @@ data class YtArtist(
 )
 
 @Immutable
+data class YtPlaylist(
+    val browseId: String,
+    val title: String,
+    val trackCount: String,
+    val thumbnailUrl: String,
+)
+
+@Immutable
 data class YtSearchResults(
     val tracks: List<YtTrack> = emptyList(),
     val albums: List<YtAlbum> = emptyList(),

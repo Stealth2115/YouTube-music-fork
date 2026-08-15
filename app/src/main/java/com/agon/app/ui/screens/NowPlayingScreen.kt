@@ -104,6 +104,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import com.agon.app.data.Song
+import com.agon.app.player.TempoPresets
 import com.agon.app.data.formatTime
 import com.agon.app.ui.components.Artwork
 import com.agon.app.ui.components.MusicVisualizer
@@ -435,6 +436,26 @@ private fun SecondaryControl(icon: ImageVector, label: String, active: Boolean, 
 private fun AudioSheet(vm: PlayerViewModel, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 36.dp)) {
+            Text("Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "One-tap speed + pitch combos: Nightcore, Deep, Vaporwave\u2026",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
+                TempoPresets.presets.forEach { preset ->
+                    FilterChip(
+                        selected = vm.tempoPreset == preset.name,
+                        onClick = { vm.applyTempoPreset(preset.name) },
+                        label = { Text(preset.name) },
+                    )
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Pitch", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text(pitchLabel(vm.pitchSemitones), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

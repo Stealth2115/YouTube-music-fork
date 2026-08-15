@@ -55,6 +55,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.agon.app.ui.components.MiniPlayer
+import com.agon.app.ui.components.YouTubeLoginDialog
 import com.agon.app.ui.screens.EqualizerScreen
 import com.agon.app.ui.screens.HomeScreen
 import com.agon.app.ui.screens.LibraryScreen
@@ -187,6 +188,10 @@ fun MainScaffold(vm: PlayerViewModel) {
                 },
             )
         }
+
+        // Shown globally so the Google device-authorization flow can be triggered
+        // from Settings, the Search screen, or anywhere else.
+        if (vm.ytLoginCode != null) YouTubeLoginDialog(vm)
     }
     BackHandler(enabled = vm.showNowPlaying) { vm.showNowPlaying = false }
 }

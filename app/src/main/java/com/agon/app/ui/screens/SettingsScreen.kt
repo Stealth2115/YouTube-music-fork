@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
@@ -164,6 +165,31 @@ fun SettingsScreen(vm: PlayerViewModel, onOpenEqualizer: () -> Unit) {
                     Icons.Default.Lyrics, "Synchronized lyrics",
                     "Redline reads .lrc files stored next to your audio files (same name, .lrc extension). Open lyrics from the player screen.",
                 )
+            }
+        }
+        item {
+            SettingsCard("YOUTUBE MUSIC") {
+                if (vm.ytSignedIn) {
+                    SettingRow(
+                        Icons.Default.Person, "Google account connected",
+                        "${vm.ytLikedSongs.size} liked songs \u2022 ${vm.ytPlaylists.size} playlists",
+                        trailing = {
+                            TextButton(onClick = vm::signOutYt) { Text("Sign out") }
+                        },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(
+                        Icons.Default.Refresh, "Refresh library",
+                        "Reload your liked songs and playlists from YouTube Music",
+                        onClick = vm::refreshYtLibrary,
+                    )
+                } else {
+                    SettingRow(
+                        Icons.Default.Person, "Sign in with Google",
+                        "Access your liked songs and playlists \u2014 no API key needed",
+                        onClick = vm::startYtLogin,
+                    )
+                }
             }
         }
         item {

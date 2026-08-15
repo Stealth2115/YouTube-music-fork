@@ -35,6 +35,7 @@ data class SavedState(
     val bg: String,
     val visualizer: String,
     val resume: Boolean,
+    val ytSongsJson: String,
 )
 
 class UserPrefs(private val context: Context) {
@@ -61,6 +62,7 @@ class UserPrefs(private val context: Context) {
         val BG = stringPreferencesKey("bg")
         val VIS = stringPreferencesKey("visualizer")
         val RESUME = booleanPreferencesKey("resume")
+        val YT_SONGS = stringPreferencesKey("yt_songs")
     }
 
     suspend fun load(): SavedState {
@@ -89,6 +91,7 @@ class UserPrefs(private val context: Context) {
             bg = p[K.BG] ?: "Pure Black",
             visualizer = p[K.VIS] ?: "Bars",
             resume = p[K.RESUME] ?: true,
+            ytSongsJson = p[K.YT_SONGS] ?: "[]",
         )
     }
 
@@ -136,4 +139,7 @@ class UserPrefs(private val context: Context) {
 
     suspend fun saveResume(resume: Boolean) =
         context.dataStore.edit { it[K.RESUME] = resume }
+
+    suspend fun saveYtSongs(jsonString: String) =
+        context.dataStore.edit { it[K.YT_SONGS] = jsonString }
 }

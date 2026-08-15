@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import java.util.Locale
 
 @Immutable
+@Serializable
 data class Song(
     val id: Long,
     val title: String,
