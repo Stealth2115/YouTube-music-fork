@@ -1,0 +1,14 @@
+# Android / Gradle build outputs
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing material must never be committed
+*.keystore
+*.jks
