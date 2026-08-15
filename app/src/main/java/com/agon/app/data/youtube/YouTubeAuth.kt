@@ -82,21 +82,27 @@ class YouTubeAuth(private val context: Context) {
         val grant = enc("http://oauth.net/grant_type/device/1.0")
         val body = "client_id=${enc(CLIENT_ID)}&client_secret=${enc(CLIENT_SECRET)}" +
             "&code=${enc(deviceCode)}&grant_type=$grant"
+        var authorized = false
         while (true) {
-            val response = postForm(TOKEN_URL, body) ?: return@withContext false
+            val response = postForm(TOKEN_URL, body)
+            if (response == null) break
             val access = response.str("access_token")
             if (access != null) {
-                val refresh = response.str("refresh_token") ?: return@withContext false
-                val expiresIn = response.num("expires_in") ?: 3600L
-                saveTokens(access, refresh, System.currentTimeMillis() + expiresIn * 1000L)
-                return@withContext true
+                val refresh = response.str("refresh_token")
+                if (refresh != null) {
+                    val expiresIn = response.num("expires_in") ?: 3600L
+                    saveTokens(access, refresh, System.currentTimeMillis() + expiresIn * 1000L)
+                    authorized = true
+                }
+                break
             }
             when (response.str("error")) {
-                "access_denied", "expired_token" -> return@withContext false
+                "access_denied", "expired_token" -> break
                 "slow_down" -> delay(5_000L)
                 else -> delay(2_000L) // authorization_pending
             }
         }
+        authorized
     }
 
     /** A valid access token, refreshing it first when expired. Null when signed out or the refresh fails. */
