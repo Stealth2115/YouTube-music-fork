@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import java.net.HttpURLConnection
-import java.net.URI
 
 /**
  * Turns raw InnerTube responses into the app's models.
@@ -24,6 +22,11 @@ class YouTubeRepository {
     private val searchCache = LruCache<String, YtSearchResults>(24)
     private val albumCache = LruCache<String, List<YtTrack>>(16)
     private val streamCache = LruCache<String, StreamResult.Success>(48)
+
+    // Per-video client fallback: when a resolved stream URL fails during playback, the
+    // client that produced it is marked failed so the next resolution uses a new client.
+    private val failedClientIds = LruCache<String, MutableSet<String>>(128)
+    private val lastUsedClient = LruCache<String, String>(128)
 
     /** Grace period so a stream URL is never handed out right before it expires. */
     private val expiryGuardMs = 60_000L
@@ -99,24 +102,23 @@ class YouTubeRepository {
 
         var lastReason = "This track can't be played"
         var gotAnyResponse = false
-        for (response in InnerTube.playerResponses(videoId)) {
+        for (pr in InnerTube.playerResponses(videoId)) {
+            if (pr.clientId in failedClientIds[videoId].orEmpty()) {
+                Log.d(TAG, "resolve $videoId: skipping previously failed client ${pr.clientId}")
+                continue
+            }
             gotAnyResponse = true
+            val response = pr.json
             val status = response.obj("playabilityStatus")
             val state = status.str("status")
-            Log.d(TAG, "resolve $videoId: playabilityStatus=${state ?: "(missing)"}")
+            Log.d(TAG, "resolve $videoId (client ${pr.clientId}): playabilityStatus=$state")
             if (state != null && state != "OK") {
                 lastReason = playabilityMessage(state, status)
                 continue
             }
             val url = pickAudioUrl(response) ?: continue
-            // Validate the CDN URL actually serves before handing it to the player. A 403
-            // here means this client's stream is blocked; fall through to the next client.
-            if (!isStreamUrlPlayable(url)) {
-                Log.w(TAG, "resolve $videoId: stream URL rejected by CDN (${urlHost(url)})")
-                lastReason = "Stream blocked by YouTube"
-                continue
-            }
-            Log.d(TAG, "resolve $videoId: got playable stream (${urlHost(url)})")
+            Log.d(TAG, "resolve $videoId: client ${pr.clientId} produced a stream URL")
+            lastUsedClient.put(videoId, pr.clientId)
             val success = StreamResult.Success(url, expiryOf(url, now))
             streamCache.put(videoId, success)
             return success
@@ -126,37 +128,31 @@ class YouTubeRepository {
         return StreamResult.Unavailable(lastReason)
     }
 
-    fun invalidateStream(videoId: String) {
+    /**
+     * Called when playback of [videoId] fails: clears the cached URL and marks the client
+     * that produced it as failed so the next resolution tries a different client. Returns
+     * true when a client was actually marked (i.e. the failure happened while streaming).
+     */
+    fun invalidateStream(videoId: String): Boolean {
         streamCache.remove(videoId)
+        val client = lastUsedClient.remove(videoId) ?: return false
+        val failed = failedClientIds[videoId]
+            ?: HashSet<String>().also { failedClientIds.put(videoId, it) }
+        failed.add(client)
+        Log.d(TAG, "invalidate $videoId: client $client marked failed")
+        return true
     }
 
-    /** HEAD-checks a resolved googlevideo URL so a blocked stream falls through to the next client. */
-    private fun isStreamUrlPlayable(url: String): Boolean {
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
-                requestMethod = "HEAD"
-                connectTimeout = 6_000
-                readTimeout = 6_000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", STREAM_FETCH_UA)
-                setRequestProperty("Referer", "https://music.youtube.com/")
-                setRequestProperty("Origin", "https://music.youtube.com")
-            }
-            when (val code = conn.responseCode) {
-                in 200..299 -> true
-                403, 404, 410 -> false
-                else -> true // 405 (HEAD unsupported), 3xx/5xx that GET may still serve, etc.
-            }
-        } catch (_: Exception) {
-            // Couldn't validate — be permissive so a flaky HEAD doesn't reject a good URL.
-            true
-        } finally {
-            conn?.disconnect()
-        }
+    /** How many stream clients are still untried for [videoId]. */
+    fun remainingStreamClients(videoId: String): Int {
+        val failed = failedClientIds[videoId]?.size ?: 0
+        return (InnerTube.playerClientCount - failed).coerceAtLeast(0)
     }
 
-    private fun urlHost(url: String): String = runCatching { URI(url).host }.getOrDefault("unknown")
+    fun resetStreamClients(videoId: String) {
+        failedClientIds.remove(videoId)
+        lastUsedClient.remove(videoId)
+    }
 
     // ---------------- Parsing ----------------
 

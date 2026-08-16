@@ -252,7 +252,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun handlePlaybackError(error: PlaybackException) {
         val failedId = player.currentMediaItem?.mediaId?.toLongOrNull()
         val videoId = failedId?.let { resolveSong(it) }?.let(::videoIdOf)
-        if (videoId != null) youtube.invalidateStream(videoId)
 
         // Log the whole cause chain + ExoPlayer error code so failures are diagnosable
         // via `adb logcat -s PlayerViewModel YouTubeRepository`.
@@ -267,6 +266,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             depth++
         }
         Log.w(TAG, "Playback error [code=${error.errorCode}]: $chain")
+
+        // For YouTube tracks, a failure usually means the current stream client's CDN URL
+        // was rejected. Try the next client for the SAME track before giving up on it.
+        if (videoId != null && youtube.invalidateStream(videoId)) {
+            if (youtube.remainingStreamClients(videoId) > 0) {
+                Log.w(TAG, "Retrying same track with a different stream client")
+                playbackError = null
+                player.seekTo(player.currentMediaItemIndex, 0L)
+                player.prepare()
+                player.play()
+                return
+            }
+            youtube.resetStreamClients(videoId)
+        }
 
         val msg = describePlaybackError(error)
         consecutivePlaybackErrors++
@@ -491,7 +504,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-resolves the current YouTube track's stream and replays it from the start. */
     fun retryCurrent() {
         val id = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
-        resolveSong(id)?.let(::videoIdOf)?.let { youtube.invalidateStream(it) }
+        resolveSong(id)?.let(::videoIdOf)?.let { videoId ->
+            youtube.invalidateStream(videoId)
+            if (youtube.remainingStreamClients(videoId) == 0) youtube.resetStreamClients(videoId)
+        }
         playbackError = null
         player.seekTo(player.currentMediaItemIndex, 0L)
         player.prepare()

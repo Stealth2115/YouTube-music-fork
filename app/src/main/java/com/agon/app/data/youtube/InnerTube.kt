@@ -171,14 +171,18 @@ internal object InnerTube {
         PlayerClient(IOS_CLIENT_ID, IOS_VERSION, IOS_UA, ::iosContext),
     )
 
+    data class PlayerResponse(val clientId: String, val json: JsonObject)
+
+    val playerClientCount: Int get() = PLAYER_CLIENTS.size
+
     /**
      * Player endpoint. Returns the raw InnerTube responses in priority order; the caller
      * walks the list and uses the first response with a playable audio URL. visionOS is
      * tried first because it returns plain, un-ciphered progressive stream URLs without
      * requiring a proof-of-origin token or JavaScript signature deciphering.
      */
-    fun playerResponses(videoId: String): List<JsonObject> {
-        val out = ArrayList<JsonObject>(PLAYER_CLIENTS.size)
+    fun playerResponses(videoId: String): List<PlayerResponse> {
+        val out = ArrayList<PlayerResponse>(PLAYER_CLIENTS.size)
         for (client in PLAYER_CLIENTS) {
             val body = buildJsonObject {
                 put("context", client.context())
@@ -186,7 +190,8 @@ internal object InnerTube {
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             }
-            postPlayer(MUSIC_BASE + "player?prettyPrint=false", body, client)?.let(out::add)
+            postPlayer(MUSIC_BASE + "player?prettyPrint=false", body, client)
+                ?.let { out.add(PlayerResponse(client.clientId, it)) }
         }
         return out
     }
