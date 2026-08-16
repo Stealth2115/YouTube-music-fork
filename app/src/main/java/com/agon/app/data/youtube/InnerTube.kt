@@ -33,27 +33,27 @@ internal object InnerTube {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/129.0.0.0 Safari/537.36"
 
-    // Player client configs mirror the maintained InnerTune forks (e.g. Metrolist), which
-    // resolve playable audio via music.youtube.com. visionOS is tried first because its CDN
-    // URLs stream without a proof-of-origin token or JS signature deciphering.
+    // Player client configs mirror the current (July 2026) yt-dlp client table - the most
+    // recent known-good versions. YouTube rejects older client versions with
+    // "no longer supported in this application or device", so these are updated together.
     private const val VISIONOS_NAME = "VISIONOS"
-    private const val VISIONOS_VERSION = "0.1"
+    private const val VISIONOS_VERSION = "1.02"
     private const val VISIONOS_CLIENT_ID = "101"
     private const val VISIONOS_UA =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
-            "(KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
+            "(KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     private const val ANDROID_VR_NAME = "ANDROID_VR"
-    private const val ANDROID_VR_VERSION = "1.61.48"
+    private const val ANDROID_VR_VERSION = "1.65.10"
     private const val ANDROID_VR_CLIENT_ID = "28"
     private const val ANDROID_VR_UA =
-        "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; " +
-            "Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)"
+        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; " +
+            "eureka-user Build/SQ3A.220605.009.A1) gzip"
 
     private const val IOS_NAME = "IOS"
-    private const val IOS_VERSION = "21.03.1"
+    private const val IOS_VERSION = "21.26.4"
     private const val IOS_CLIENT_ID = "5"
-    private const val IOS_UA = "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)"
+    private const val IOS_UA = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
 
     // Embedded TV client: bypasses age-restriction for logged-out users. Some of its
     // formats may be ciphered, so it is tried after the plain-URL clients.
@@ -95,8 +95,8 @@ internal object InnerTube {
             put("deviceMake", "Oculus")
             put("deviceModel", "Quest 3")
             put("osName", "Android")
-            put("osVersion", "12")
-            put("androidSdkVersion", 32)
+            put("osVersion", "11")
+            put("androidSdkVersion", 30)
             put("hl", "en")
             put("gl", "US")
             put("userAgent", ANDROID_VR_UA)
@@ -110,7 +110,7 @@ internal object InnerTube {
             put("deviceMake", "Apple")
             put("deviceModel", "iPhone16,2")
             put("osName", "iPhone")
-            put("osVersion", "18.2.22C152")
+            put("osVersion", "18.3.2.22D82")
             put("hl", "en")
             put("gl", "US")
             put("userAgent", IOS_UA)
@@ -122,9 +122,9 @@ internal object InnerTube {
             put("clientName", VISIONOS_NAME)
             put("clientVersion", VISIONOS_VERSION)
             put("deviceMake", "Apple")
-            put("deviceModel", "RealityDevice14,1")
+            put("deviceModel", "RealityDevice17,1")
             put("osName", "visionOS")
-            put("osVersion", "1.3.21O771")
+            put("osVersion", "26.5.23O471")
             put("hl", "en")
             put("gl", "US")
             put("userAgent", VISIONOS_UA)
