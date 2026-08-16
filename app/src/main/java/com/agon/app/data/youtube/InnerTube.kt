@@ -276,11 +276,17 @@ internal object InnerTube {
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode
             if (code !in 200..299) {
-                conn.errorStream?.use { it.readBounded() }
+                val errBody = conn.errorStream?.use { it.readBounded() }?.take(300)
+                android.util.Log.w("InnerTube", "player ${client.clientId}: HTTP $code ${errBody.orEmpty()}")
                 return null
             }
             val text = conn.decodedStream().use { it.readBounded() }
-            json.parseToJsonElement(text) as? JsonObject
+            val parsed = json.parseToJsonElement(text) as? JsonObject
+            android.util.Log.d(
+                "InnerTube",
+                "player ${client.clientId}: OK, hasStreamingData=${parsed.obj("streamingData") != null}"
+            )
+            parsed
         } catch (_: IOException) {
             null
         } catch (_: RuntimeException) {

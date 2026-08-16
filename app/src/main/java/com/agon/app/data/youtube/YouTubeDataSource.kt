@@ -37,9 +37,16 @@ class YouTubeStreamResolver(private val repository: YouTubeRepository) : Resolvi
 /** Signals content that is unavailable, region-locked, age-restricted or removed. */
 class YouTubeUnavailableException(message: String) : IOException(message)
 
+/** Browser UA used when downloading resolved googlevideo stream URLs. */
+const val STREAM_FETCH_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+
 /**
  * Data source factory used by the shared ExoPlayer: local content keeps going through
  * [DefaultDataSource] exactly as before, while `ytstream://` items are resolved first.
+ * The HTTP data source sends a browser UA plus the YouTube Music origin/referer, which
+ * the googlevideo CDN expects for these signed stream URLs.
  */
 fun youTubeAwareDataSourceFactory(
     context: Context,
@@ -49,9 +56,12 @@ fun youTubeAwareDataSourceFactory(
         .setAllowCrossProtocolRedirects(true)
         .setConnectTimeoutMs(12_000)
         .setReadTimeoutMs(15_000)
-        .setUserAgent(
-            "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/129.0.0.0 Mobile Safari/537.36"
+        .setUserAgent(STREAM_FETCH_UA)
+        .setDefaultRequestProperties(
+            mapOf(
+                "Referer" to "https://music.youtube.com/",
+                "Origin" to "https://music.youtube.com",
+            )
         )
     val base = DefaultDataSource.Factory(context, http)
     return ResolvingDataSource.Factory(base, YouTubeStreamResolver(repository))

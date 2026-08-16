@@ -18,6 +18,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import com.agon.app.data.Album
 import com.agon.app.data.ArtistInfo
@@ -253,14 +254,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val videoId = failedId?.let { resolveSong(it) }?.let(::videoIdOf)
         if (videoId != null) youtube.invalidateStream(videoId)
 
-        val reason = generateSequence(error.cause) { it.cause }
-            .filterIsInstance<YouTubeUnavailableException>()
-            .firstOrNull()
-            ?.message
+        // Log the whole cause chain + ExoPlayer error code so failures are diagnosable
+        // via `adb logcat -s PlayerViewModel YouTubeRepository`.
+        val chain = StringBuilder()
+        var node: Throwable? = error
+        var depth = 0
+        while (node != null && depth < 6) {
+            if (depth > 0) chain.append(" <- ")
+            chain.append(node.javaClass.simpleName)
+            node.message?.takeIf { it.isNotBlank() }?.let { chain.append(": ").append(it) }
+            node = node.cause
+            depth++
+        }
+        Log.w(TAG, "Playback error [code=${error.errorCode}]: $chain")
 
-        Log.w(TAG, "Playback error: ${error.message} (cause=${error.cause})")
-
-        val msg = reason ?: "Can't play this track \u2014 skipping"
+        val msg = describePlaybackError(error)
         consecutivePlaybackErrors++
         val canAdvance = player.hasNextMediaItem() && consecutivePlaybackErrors < MAX_AUTO_SKIPS
         if (canAdvance) {
@@ -271,9 +279,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             consecutivePlaybackErrors = 0
             player.pause()
-            playbackError = reason ?: "Playback failed"
-            toast(playbackError ?: "Playback failed")
+            playbackError = msg
+            toast(msg)
         }
+    }
+
+    /** Turns a [PlaybackException] into a short, human-readable reason. */
+    private fun describePlaybackError(error: PlaybackException): String {
+        val causes = generateSequence(error.cause) { it.cause }
+
+        causes.filterIsInstance<YouTubeUnavailableException>()
+            .firstOrNull()?.message
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.let { return "Stream rejected by YouTube (HTTP ${it.responseCode})" }
+
+        return "Playback failed"
     }
 
     init {

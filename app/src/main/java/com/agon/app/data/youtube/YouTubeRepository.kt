@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.net.HttpURLConnection
+import java.net.URI
 
 /**
  * Turns raw InnerTube responses into the app's models.
@@ -107,7 +109,14 @@ class YouTubeRepository {
                 continue
             }
             val url = pickAudioUrl(response) ?: continue
-            Log.d(TAG, "resolve $videoId: got stream URL (${url.length} chars)")
+            // Validate the CDN URL actually serves before handing it to the player. A 403
+            // here means this client's stream is blocked; fall through to the next client.
+            if (!isStreamUrlPlayable(url)) {
+                Log.w(TAG, "resolve $videoId: stream URL rejected by CDN (${urlHost(url)})")
+                lastReason = "Stream blocked by YouTube"
+                continue
+            }
+            Log.d(TAG, "resolve $videoId: got playable stream (${urlHost(url)})")
             val success = StreamResult.Success(url, expiryOf(url, now))
             streamCache.put(videoId, success)
             return success
@@ -120,6 +129,34 @@ class YouTubeRepository {
     fun invalidateStream(videoId: String) {
         streamCache.remove(videoId)
     }
+
+    /** HEAD-checks a resolved googlevideo URL so a blocked stream falls through to the next client. */
+    private fun isStreamUrlPlayable(url: String): Boolean {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
+                requestMethod = "HEAD"
+                connectTimeout = 6_000
+                readTimeout = 6_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", STREAM_FETCH_UA)
+                setRequestProperty("Referer", "https://music.youtube.com/")
+                setRequestProperty("Origin", "https://music.youtube.com")
+            }
+            when (val code = conn.responseCode) {
+                in 200..299 -> true
+                403, 404, 410 -> false
+                else -> true // 405 (HEAD unsupported), 3xx/5xx that GET may still serve, etc.
+            }
+        } catch (_: Exception) {
+            // Couldn't validate — be permissive so a flaky HEAD doesn't reject a good URL.
+            true
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun urlHost(url: String): String = runCatching { URI(url).host }.getOrDefault("unknown")
 
     // ---------------- Parsing ----------------
 
