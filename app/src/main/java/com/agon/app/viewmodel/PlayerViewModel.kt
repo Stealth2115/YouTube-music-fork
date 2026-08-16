@@ -193,9 +193,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var lyrics by mutableStateOf<List<LyricLine>?>(null); private set
     private var lyricsForSongId: Long = -1L
 
-    /** Consecutive playback errors, used to stop auto-skipping after a run of broken items. */
-    private var consecutivePlaybackErrors = 0
-
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
@@ -228,7 +225,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) {
-                consecutivePlaybackErrors = 0
                 playbackError = null
                 durationMs = player.duration.coerceAtLeast(0L)
             }
@@ -267,34 +263,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
         Log.w(TAG, "Playback error [code=${error.errorCode}]: $chain")
 
-        // For YouTube tracks, a failure usually means the current stream client's CDN URL
-        // was rejected. Try the next client for the SAME track before giving up on it.
-        if (videoId != null && youtube.invalidateStream(videoId)) {
-            if (youtube.remainingStreamClients(videoId) > 0) {
-                Log.w(TAG, "Retrying same track with a different stream client")
-                playbackError = null
-                player.seekTo(player.currentMediaItemIndex, 0L)
-                player.prepare()
-                player.play()
-                return
-            }
-            youtube.resetStreamClients(videoId)
-        }
+        // Mark the stream client that produced this track's URL as failed, so tapping
+        // Retry re-resolves with the next client. Never silently loop: always stop and
+        // surface the failure.
+        if (videoId != null) youtube.invalidateStream(videoId)
 
         val msg = describePlaybackError(error)
-        consecutivePlaybackErrors++
-        val canAdvance = player.hasNextMediaItem() && consecutivePlaybackErrors < MAX_AUTO_SKIPS
-        if (canAdvance) {
-            playbackError = msg
-            toast(msg)
-            player.seekToNextMediaItem()
-            player.prepare()
-        } else {
-            consecutivePlaybackErrors = 0
-            player.pause()
-            playbackError = msg
-            toast(msg)
-        }
+        player.pause()
+        playbackError = msg
+        toast(msg)
     }
 
     /** Turns a [PlaybackException] into a short, human-readable reason. */
@@ -372,9 +349,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         recentIds = s.recents
         playlists = runCatching { json.decodeFromString<List<Playlist>>(s.playlistsJson) }
             .getOrDefault(emptyList())
-        pitchSemitones = s.pitch
-        speed = s.speed
-        volume = s.volume
+        pitchSemitones = s.pitch.takeIf { it.isFinite() }?.coerceIn(-12f, 12f) ?: 0f
+        speed = s.speed.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.5f, 2f) ?: 1f
+        volume = s.volume.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
         eqEnabled = s.eqEnabled
         if (s.eqBands.isNotEmpty()) bandLevels = s.eqBands
         eqPreset = s.eqPreset
@@ -491,7 +468,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playSongs(list: List<Song>, startIndex: Int = 0, shuffled: Boolean = false) {
         if (list.isEmpty()) return
-        consecutivePlaybackErrors = 0
         playbackError = null
         rememberRemote(list)
         player.setMediaItems(list.map { it.toMediaItem() }, startIndex.coerceIn(0, list.lastIndex), 0L)
@@ -615,7 +591,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPitch(semitones: Float) {
-        pitchSemitones = semitones.coerceIn(-12f, 12f)
+        pitchSemitones = semitones.takeIf { it.isFinite() }?.coerceIn(-12f, 12f) ?: 0f
         tempoPreset = "Custom"
         applyPlaybackParams()
         persistAudio()
@@ -626,7 +602,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun resetPitch() = setPitch(0f)
 
     fun setPlaybackSpeed(newSpeed: Float) {
-        speed = newSpeed.coerceIn(0.5f, 2f)
+        speed = newSpeed.takeIf { it.isFinite() }?.coerceIn(0.5f, 2f) ?: 1f
         tempoPreset = "Custom"
         applyPlaybackParams()
         persistAudio()
@@ -645,14 +621,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun resetTempo() = applyTempoPreset("Normal")
 
     fun updateVolume(v: Float) {
-        volume = v.coerceIn(0f, 1f)
+        volume = v.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
         player.volume = volume
         persistAudio()
     }
 
+    /**
+     * Applies speed + pitch to the player. Values are clamped to media3's safe ranges and
+     * failures are swallowed so an invalid value can never brick playback (ExoPlayer's
+     * PlaybackParameters constructor throws on non-positive speed/pitch).
+     */
     private fun applyPlaybackParams() {
-        val pitchFactor = 2f.pow(pitchSemitones / 12f)
-        player.playbackParameters = PlaybackParameters(speed, pitchFactor)
+        val safeSpeed = speed.takeIf { it.isFinite() }?.coerceIn(0.25f, 4f) ?: 1f
+        val safePitch = pitchSemitones.takeIf { it.isFinite() }?.coerceIn(-24f, 24f) ?: 0f
+        val pitchFactor = 2f.pow(safePitch / 12f)
+        runCatching {
+            player.playbackParameters = PlaybackParameters(safeSpeed, pitchFactor)
+        }.onFailure {
+            // Reset to a sane default so playback keeps working.
+            speed = 1f
+            pitchSemitones = 0f
+            runCatching { player.playbackParameters = PlaybackParameters(1f, 1f) }
+        }
     }
 
     // ---------------- Favorites ----------------
@@ -1031,6 +1021,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         ytSignedIn = false
         ytLikedSongs = emptyList()
         ytPlaylists = emptyList()
+        youtube.authToken = null
         toast("Signed out of YouTube Music")
     }
 
@@ -1048,6 +1039,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             var failed = false
+            youtube.authToken = token
             val liked = runCatching { youtube.likedSongs(token) }
                 .onFailure { failed = true }
                 .getOrDefault(emptyList())
@@ -1080,6 +1072,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 toast("Sign in to YouTube Music first")
                 return@launch
             }
+            youtube.authToken = token
             val tracks = runCatching { load(token) }.getOrDefault(emptyList())
             ytLoadingCollection = false
             if (tracks.isEmpty()) toast("Nothing playable in $label")
@@ -1160,8 +1153,5 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         /** Upper bound on cached non-MediaStore songs; ~300 entries is a few hundred KB. */
         const val MAX_REMOTE_SONGS = 300
-
-        /** Stop auto-advancing after this many consecutive playback failures. */
-        const val MAX_AUTO_SKIPS = 3
     }
 }

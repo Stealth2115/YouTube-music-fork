@@ -55,6 +55,15 @@ internal object InnerTube {
     private const val IOS_CLIENT_ID = "5"
     private const val IOS_UA = "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)"
 
+    // Embedded TV client: bypasses age-restriction for logged-out users. Some of its
+    // formats may be ciphered, so it is tried after the plain-URL clients.
+    private const val TV_EMBED_NAME = "TVHTML5_SIMPLY_EMBEDDED_PLAYER"
+    private const val TV_EMBED_VERSION = "2.0"
+    private const val TV_EMBED_CLIENT_ID = "85"
+    private const val TV_EMBED_UA =
+        "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 " +
+            "(KHTML, like Gecko) Version/15.4 Safari/605.1.15"
+
     private const val CONNECT_TIMEOUT_MS = 12_000
     private const val READ_TIMEOUT_MS = 15_000
     private const val MAX_RESPONSE_BYTES = 6 * 1024 * 1024
@@ -122,6 +131,19 @@ internal object InnerTube {
         }
     }
 
+    private fun tvEmbedContext(videoId: String): JsonObject = buildJsonObject {
+        putJsonObject("client") {
+            put("clientName", TV_EMBED_NAME)
+            put("clientVersion", TV_EMBED_VERSION)
+            put("hl", "en")
+            put("gl", "US")
+            put("userAgent", TV_EMBED_UA)
+        }
+        putJsonObject("thirdParty") {
+            put("embedUrl", "https://www.youtube.com/watch?v=$videoId")
+        }
+    }
+
     /** music.youtube.com search. Returns the raw InnerTube response, or null on failure. */
     fun search(query: String, params: String?): JsonObject? {
         val body = buildJsonObject {
@@ -161,14 +183,15 @@ internal object InnerTube {
         val clientId: String,
         val version: String,
         val userAgent: String,
-        val context: () -> JsonObject,
+        val context: (String) -> JsonObject,
     )
 
     /** Player clients tried in priority order; the first one yielding a playable URL wins. */
     private val PLAYER_CLIENTS = listOf(
-        PlayerClient(VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA, ::visionOsContext),
-        PlayerClient(ANDROID_VR_CLIENT_ID, ANDROID_VR_VERSION, ANDROID_VR_UA, ::androidVrContext),
-        PlayerClient(IOS_CLIENT_ID, IOS_VERSION, IOS_UA, ::iosContext),
+        PlayerClient(VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA, { visionOsContext() }),
+        PlayerClient(ANDROID_VR_CLIENT_ID, ANDROID_VR_VERSION, ANDROID_VR_UA, { androidVrContext() }),
+        PlayerClient(IOS_CLIENT_ID, IOS_VERSION, IOS_UA, { iosContext() }),
+        PlayerClient(TV_EMBED_CLIENT_ID, TV_EMBED_VERSION, TV_EMBED_UA, ::tvEmbedContext),
     )
 
     data class PlayerResponse(val clientId: String, val json: JsonObject)
@@ -180,17 +203,20 @@ internal object InnerTube {
      * walks the list and uses the first response with a playable audio URL. visionOS is
      * tried first because it returns plain, un-ciphered progressive stream URLs without
      * requiring a proof-of-origin token or JavaScript signature deciphering.
+     *
+     * When [authToken] is set (the user signed in with Google), requests are sent with the
+     * OAuth bearer token so age-restricted / sign-in-gated tracks become playable.
      */
-    fun playerResponses(videoId: String): List<PlayerResponse> {
+    fun playerResponses(videoId: String, authToken: String? = null): List<PlayerResponse> {
         val out = ArrayList<PlayerResponse>(PLAYER_CLIENTS.size)
         for (client in PLAYER_CLIENTS) {
             val body = buildJsonObject {
-                put("context", client.context())
+                put("context", client.context(videoId))
                 put("videoId", videoId)
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             }
-            postPlayer(MUSIC_BASE + "player?prettyPrint=false", body, client)
+            postPlayer(MUSIC_BASE + "player?prettyPrint=false", body, client, authToken)
                 ?.let { out.add(PlayerResponse(client.clientId, it)) }
         }
         return out
@@ -252,7 +278,12 @@ internal object InnerTube {
     }
 
     /** POST used by [playerResponses]: per-client numeric name, user agent and YouTube origin. */
-    private fun postPlayer(url: String, body: JsonObject, client: PlayerClient): JsonObject? {
+    private fun postPlayer(
+        url: String,
+        body: JsonObject,
+        client: PlayerClient,
+        authToken: String?,
+    ): JsonObject? {
         var conn: HttpURLConnection? = null
         return try {
             val payload = body.toString().toByteArray(Charsets.UTF_8)
@@ -277,6 +308,10 @@ internal object InnerTube {
                 // Anonymous session token used by the working InnerTune forks; keeps the
                 // player endpoint from returning an empty streamingData response.
                 setRequestProperty("X-Goog-Visitor-Id", "CgtsZG1ySnZiQWtSbyiMjuGSBg%3D%3D")
+                if (authToken != null) {
+                    setRequestProperty("Authorization", "Bearer $authToken")
+                    setRequestProperty("X-Goog-AuthUser", "0")
+                }
             }
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode

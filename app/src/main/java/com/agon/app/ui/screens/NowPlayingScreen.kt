@@ -199,6 +199,9 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = vm::retryCurrent) { Text("Retry") }
+                    if (!vm.ytSignedIn) {
+                        TextButton(onClick = vm::startYtLogin) { Text("Sign in") }
+                    }
                 }
             }
         }
