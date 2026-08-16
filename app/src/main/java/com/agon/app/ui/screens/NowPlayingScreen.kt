@@ -94,6 +94,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -136,9 +137,11 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
         Modifier
             .fillMaxSize()
             .background(
+                // Fully opaque so nothing behind the player shows through. The accent is
+                // composited over the background instead of layered with alpha.
                 Brush.verticalGradient(
                     listOf(
-                        accent.copy(alpha = 0.20f),
+                        lerp(MaterialTheme.colorScheme.background, accent, 0.2f),
                         MaterialTheme.colorScheme.background,
                         MaterialTheme.colorScheme.background,
                     )

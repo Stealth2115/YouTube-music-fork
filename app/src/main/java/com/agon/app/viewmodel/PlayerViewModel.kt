@@ -2,6 +2,7 @@ package com.agon.app.viewmodel
 
 import android.app.Application
 import android.content.Intent
+import android.util.Log
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -200,7 +201,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            consecutivePlaybackErrors = 0
             refreshCurrent()
             if (stopAfterCurrent && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 player.pause()
@@ -254,6 +254,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             .filterIsInstance<YouTubeUnavailableException>()
             .firstOrNull()
             ?.message
+
+        Log.w(TAG, "Playback error: ${error.message} (cause=${error.cause})")
 
         consecutivePlaybackErrors++
         val canAdvance = player.hasNextMediaItem() && consecutivePlaybackErrors < MAX_AUTO_SKIPS
@@ -446,6 +448,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playSongs(list: List<Song>, startIndex: Int = 0, shuffled: Boolean = false) {
         if (list.isEmpty()) return
+        consecutivePlaybackErrors = 0
         rememberRemote(list)
         player.setMediaItems(list.map { it.toMediaItem() }, startIndex.coerceIn(0, list.lastIndex), 0L)
         player.shuffleModeEnabled = shuffled
@@ -1096,6 +1099,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val TAG = "PlayerViewModel"
+
         /** Upper bound on cached non-MediaStore songs; ~300 entries is a few hundred KB. */
         const val MAX_REMOTE_SONGS = 300
 

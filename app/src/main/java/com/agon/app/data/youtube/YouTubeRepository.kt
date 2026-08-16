@@ -1,5 +1,6 @@
 package com.agon.app.data.youtube
 
+import android.util.Log
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,6 +14,10 @@ import kotlinx.serialization.json.JsonPrimitive
  * any kind is sent or stored. Results are kept only in a small bounded in-memory cache.
  */
 class YouTubeRepository {
+
+    private companion object {
+        const val TAG = "YouTubeRepository"
+    }
 
     private val searchCache = LruCache<String, YtSearchResults>(24)
     private val albumCache = LruCache<String, List<YtTrack>>(16)
@@ -96,16 +101,19 @@ class YouTubeRepository {
             gotAnyResponse = true
             val status = response.obj("playabilityStatus")
             val state = status.str("status")
+            Log.d(TAG, "resolve $videoId: playabilityStatus=${state ?: "(missing)"}")
             if (state != null && state != "OK") {
                 lastReason = playabilityMessage(state, status)
                 continue
             }
             val url = pickAudioUrl(response) ?: continue
+            Log.d(TAG, "resolve $videoId: got stream URL (${url.length} chars)")
             val success = StreamResult.Success(url, expiryOf(url, now))
             streamCache.put(videoId, success)
             return success
         }
         if (!gotAnyResponse) lastReason = "Couldn't reach YouTube"
+        Log.w(TAG, "resolve $videoId: failed - $lastReason")
         return StreamResult.Unavailable(lastReason)
     }
 
