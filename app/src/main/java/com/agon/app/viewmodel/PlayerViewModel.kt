@@ -178,6 +178,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- UI ----------------
     var showNowPlaying by mutableStateOf(false)
     var message by mutableStateOf<String?>(null); private set
+    var playbackError by mutableStateOf<String?>(null); private set
     fun consumeMessage() { message = null }
     private fun toast(text: String) { message = text }
 
@@ -201,6 +202,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            playbackError = null
             refreshCurrent()
             if (stopAfterCurrent && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 player.pause()
@@ -226,6 +228,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) {
                 consecutivePlaybackErrors = 0
+                playbackError = null
                 durationMs = player.duration.coerceAtLeast(0L)
             }
         }
@@ -257,16 +260,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         Log.w(TAG, "Playback error: ${error.message} (cause=${error.cause})")
 
+        val msg = reason ?: "Can't play this track \u2014 skipping"
         consecutivePlaybackErrors++
         val canAdvance = player.hasNextMediaItem() && consecutivePlaybackErrors < MAX_AUTO_SKIPS
         if (canAdvance) {
-            toast(reason ?: "Can't play this track \u2014 skipping")
+            playbackError = msg
+            toast(msg)
             player.seekToNextMediaItem()
             player.prepare()
         } else {
             consecutivePlaybackErrors = 0
             player.pause()
-            toast(reason ?: "Playback failed")
+            playbackError = reason ?: "Playback failed"
+            toast(playbackError ?: "Playback failed")
         }
     }
 
@@ -449,12 +455,23 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun playSongs(list: List<Song>, startIndex: Int = 0, shuffled: Boolean = false) {
         if (list.isEmpty()) return
         consecutivePlaybackErrors = 0
+        playbackError = null
         rememberRemote(list)
         player.setMediaItems(list.map { it.toMediaItem() }, startIndex.coerceIn(0, list.lastIndex), 0L)
         player.shuffleModeEnabled = shuffled
         player.prepare()
         player.play()
         startService()
+    }
+
+    /** Re-resolves the current YouTube track's stream and replays it from the start. */
+    fun retryCurrent() {
+        val id = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        resolveSong(id)?.let(::videoIdOf)?.let { youtube.invalidateStream(it) }
+        playbackError = null
+        player.seekTo(player.currentMediaItemIndex, 0L)
+        player.prepare()
+        player.play()
     }
 
     fun shuffleAll() {

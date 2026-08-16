@@ -269,6 +269,9 @@ internal object InnerTube {
                 setRequestProperty("X-Origin", "https://music.youtube.com")
                 setRequestProperty("Origin", "https://music.youtube.com")
                 setRequestProperty("Referer", "https://music.youtube.com/")
+                // Anonymous session token used by the working InnerTune forks; keeps the
+                // player endpoint from returning an empty streamingData response.
+                setRequestProperty("X-Goog-Visitor-Id", "CgtsZG1ySnZiQWtSbyiMjuGSBg%3D%3D")
             }
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode

@@ -76,6 +76,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -147,6 +148,14 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
                     )
                 )
             )
+            // Swallow taps that land on the background so they can't pass through to the
+            // screen below. Buttons/sliders still work because they consume their own
+            // gestures first (child nodes are processed before this parent).
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { /* no-op: just block pass-through */ },
+            )
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp),
@@ -166,6 +175,31 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
             )
             IconButton(onClick = { playlistTarget = song }) {
                 Icon(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist")
+            }
+        }
+
+        // Playback failure banner (the snackbar lives behind this overlay, so surface
+        // errors here instead).
+        vm.playbackError?.let { err ->
+            Surface(
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                ) {
+                    Text(
+                        err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = vm::retryCurrent) { Text("Retry") }
+                }
             }
         }
 
