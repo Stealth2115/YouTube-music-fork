@@ -64,16 +64,27 @@ class YouTubeRepository {
     /** Liked songs of the signed-in account. */
     suspend fun likedSongs(authToken: String, limit: Int = 200): List<YtTrack> =
         withContext(Dispatchers.IO) {
-            val response = InnerTube.browseAuthed("LM", authToken) ?: return@withContext emptyList()
-            parseTracks(response, limit)
+            val response = InnerTube.browseAuthed("LM", authToken)
+            if (response == null) {
+                Log.w(TAG, "likedSongs: browse LM returned null (auth request failed)")
+                return@withContext emptyList()
+            }
+            parseTracks(response, limit).also {
+                Log.d(TAG, "likedSongs: parsed ${it.size} tracks")
+            }
         }
 
     /** Playlists saved in the signed-in account's library. */
     suspend fun libraryPlaylists(authToken: String, limit: Int = 100): List<YtPlaylist> =
         withContext(Dispatchers.IO) {
             val response = InnerTube.browseAuthed("FEmusic_liked_playlists", authToken)
-                ?: return@withContext emptyList()
-            parsePlaylists(response, limit)
+            if (response == null) {
+                Log.w(TAG, "libraryPlaylists: browse returned null (auth request failed)")
+                return@withContext emptyList()
+            }
+            parsePlaylists(response, limit).also {
+                Log.d(TAG, "libraryPlaylists: parsed ${it.size} playlists")
+            }
         }
 
     /** Tracks of a saved library playlist. */

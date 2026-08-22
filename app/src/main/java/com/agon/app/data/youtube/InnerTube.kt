@@ -29,6 +29,7 @@ internal object InnerTube {
     private const val WEB_REMIX_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
 
     private const val WEB_REMIX_NAME = "WEB_REMIX"
+    private const val WEB_REMIX_CLIENT_ID = "67"
     private const val WEB_REMIX_VERSION = "1.20260707.12.00"
     private const val WEB_REMIX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -74,7 +75,7 @@ internal object InnerTube {
                     put("browseId", "FEmusic_home")
                 }
                 val url = MUSIC_BASE + "browse?key=" + WEB_REMIX_KEY + "&prettyPrint=false"
-                post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
+                post(url, body, WEB_REMIX_CLIENT_ID, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
                     ?.obj("responseContext")?.str("visitorData")
             }.getOrNull()
             cachedVisitorData = fetched
@@ -124,7 +125,7 @@ internal object InnerTube {
             if (params != null) put("params", params)
         }
         val url = MUSIC_BASE + "search?key=" + WEB_REMIX_KEY + "&prettyPrint=false"
-        return post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
+        return post(url, body, WEB_REMIX_CLIENT_ID, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
     }
 
     /** music.youtube.com browse (albums, artists, playlists). */
@@ -134,7 +135,7 @@ internal object InnerTube {
             put("browseId", browseId)
         }
         val url = MUSIC_BASE + "browse?key=" + WEB_REMIX_KEY + "&prettyPrint=false"
-        return post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
+        return post(url, body, WEB_REMIX_CLIENT_ID, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
     }
 
     /**
@@ -148,7 +149,7 @@ internal object InnerTube {
             put("browseId", browseId)
         }
         val url = MUSIC_BASE + "browse?prettyPrint=false"
-        return post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true, authToken = authToken)
+        return post(url, body, WEB_REMIX_CLIENT_ID, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true, authToken = authToken)
     }
 
     private data class PlayerClient(
@@ -238,11 +239,13 @@ internal object InnerTube {
                 setRequestProperty("X-Goog-Api-Format-Version", "1")
                 setRequestProperty("X-YouTube-Client-Name", clientName)
                 setRequestProperty("X-YouTube-Client-Version", clientVersion)
+                setRequestProperty("X-Goog-Request-Time", System.currentTimeMillis().toString())
                 if (authToken != null) {
                     setRequestProperty("Authorization", "Bearer $authToken")
                     setRequestProperty("X-Goog-AuthUser", "0")
                 }
                 if (music) {
+                    setRequestProperty("X-Origin", "https://music.youtube.com")
                     setRequestProperty("Origin", "https://music.youtube.com")
                     setRequestProperty("Referer", "https://music.youtube.com/")
                 }
@@ -250,7 +253,11 @@ internal object InnerTube {
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode
             if (code !in 200..299) {
-                conn.errorStream?.use { it.readBounded() }
+                val errBody = conn.errorStream?.use { it.readBounded() }?.take(300)
+                android.util.Log.w(
+                    "InnerTube",
+                    "post ${if (authToken != null) "authed " else ""}${url.substringAfterLast('/').take(40)}: HTTP $code ${errBody.orEmpty()}"
+                )
                 return null
             }
             val text = conn.decodedStream().use { it.readBounded() }
