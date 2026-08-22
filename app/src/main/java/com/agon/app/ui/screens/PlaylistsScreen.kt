@@ -135,7 +135,7 @@ fun PlaylistsScreen(vm: PlayerViewModel, onOpenPlaylist: (Long) -> Unit) {
 }
 
 @Composable
-private fun PlaylistRow(
+internal fun PlaylistRow(
     playlist: Playlist,
     artUri: String?,
     onClick: () -> Unit,

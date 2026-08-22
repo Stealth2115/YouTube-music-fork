@@ -64,9 +64,11 @@ class YouTubeRepository {
     /** Liked songs of the signed-in account. */
     suspend fun likedSongs(authToken: String, limit: Int = 200): List<YtTrack> =
         withContext(Dispatchers.IO) {
-            val response = InnerTube.browseAuthed("LM", authToken)
+            // Liked songs playlist id is "LM"; the browse endpoint expects the playlist
+            // prefixed with "VL" (the reference clients browse "VLLM").
+            val response = InnerTube.browseAuthed("VLLM", authToken)
             if (response == null) {
-                Log.w(TAG, "likedSongs: browse LM returned null (auth request failed)")
+                Log.w(TAG, "likedSongs: browse VLLM returned null (auth request failed)")
                 return@withContext emptyList()
             }
             parseTracks(response, limit).also {

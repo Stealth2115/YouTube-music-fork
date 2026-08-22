@@ -125,7 +125,7 @@ fun LibraryScreen(vm: PlayerViewModel) {
 }
 
 @Composable
-private fun SongList(vm: PlayerViewModel, list: List<Song>, onAddToPlaylist: (Song) -> Unit) {
+internal fun SongList(vm: PlayerViewModel, list: List<Song>, onAddToPlaylist: (Song) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Row(
@@ -161,7 +161,7 @@ private fun SongList(vm: PlayerViewModel, list: List<Song>, onAddToPlaylist: (So
 }
 
 @Composable
-private fun AlbumsGrid(vm: PlayerViewModel, onOpen: (Album) -> Unit) {
+internal fun AlbumsGrid(vm: PlayerViewModel, onOpen: (Album) -> Unit) {
     if (vm.albums.isEmpty()) {
         EmptyState(Icons.Default.FavoriteBorder, "No albums", "Your device has no album metadata yet.")
         return
@@ -201,7 +201,7 @@ private fun AlbumsGrid(vm: PlayerViewModel, onOpen: (Album) -> Unit) {
 }
 
 @Composable
-private fun ArtistsList(vm: PlayerViewModel, onOpen: (ArtistInfo) -> Unit) {
+internal fun ArtistsList(vm: PlayerViewModel, onOpen: (ArtistInfo) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(vm.artists, key = { it.name }) { artist ->
             Row(
@@ -236,7 +236,7 @@ private fun ArtistsList(vm: PlayerViewModel, onOpen: (ArtistInfo) -> Unit) {
 }
 
 @Composable
-private fun HistoryTab(vm: PlayerViewModel, onAddToPlaylist: (Song) -> Unit) {
+internal fun HistoryTab(vm: PlayerViewModel, onAddToPlaylist: (Song) -> Unit) {
     val list = vm.recentSongs
     if (list.isEmpty()) {
         EmptyState(Icons.Default.History, "No history yet", "Songs you play will appear here.")

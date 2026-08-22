@@ -21,10 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material3.Icon
@@ -60,11 +57,9 @@ import com.agon.app.ui.components.MiniPlayer
 import com.agon.app.ui.components.YouTubeLoginDialog
 import com.agon.app.ui.screens.EqualizerScreen
 import com.agon.app.ui.screens.HomeScreen
-import com.agon.app.ui.screens.LibraryScreen
 import com.agon.app.ui.screens.NowPlayingScreen
 import com.agon.app.ui.screens.PermissionScreen
 import com.agon.app.ui.screens.PlaylistDetailScreen
-import com.agon.app.ui.screens.PlaylistsScreen
 import com.agon.app.ui.screens.SearchScreen
 import com.agon.app.ui.screens.SettingsScreen
 import com.agon.app.ui.screens.YouTubeMusicScreen
@@ -105,11 +100,8 @@ fun RedlineApp(vm: PlayerViewModel) {
 private data class NavDest(val route: String, val label: String, val icon: ImageVector)
 
 private val destinations = listOf(
-    NavDest("home", "Home", Icons.Default.Home),
     NavDest("youtube", "YouTube", Icons.Default.SmartDisplay),
-    NavDest("library", "Library", Icons.Default.LibraryMusic),
-    NavDest("playlists", "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
-    NavDest("search", "Search", Icons.Default.Search),
+    NavDest("home", "Home", Icons.Default.Home),
     NavDest("settings", "Settings", Icons.Default.Settings),
 )
 
@@ -144,22 +136,18 @@ fun MainScaffold(vm: PlayerViewModel) {
         ) { padding ->
             NavHost(
                 navController = nav,
-                startDestination = "home",
+                startDestination = "youtube",
                 modifier = Modifier.padding(padding),
                 enterTransition = { fadeIn(tween(220)) },
                 exitTransition = { fadeOut(tween(180)) },
             ) {
+                composable("youtube") { YouTubeMusicScreen(vm) }
                 composable("home") {
                     HomeScreen(
                         vm,
                         onOpenSearch = { navTo(nav, "search") },
                         onOpenPlaylist = { nav.navigate("playlist/$it") },
                     )
-                }
-                composable("youtube") { YouTubeMusicScreen(vm) }
-                composable("library") { LibraryScreen(vm) }
-                composable("playlists") {
-                    PlaylistsScreen(vm, onOpenPlaylist = { nav.navigate("playlist/$it") })
                 }
                 composable("playlist/{id}") { entry ->
                     PlaylistDetailScreen(
