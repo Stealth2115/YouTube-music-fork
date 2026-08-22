@@ -5,11 +5,10 @@ import kotlin.math.abs
 /**
  * Curated speed + pitch combinations that are applied together with one tap.
  *
- * Values follow the conventions of the nightcore / slowed-and-reverbed remix
- * communities: "nightcore" is sped up and pitched up, while "deep", "daycore"
- * and "vaporwave" are slowed and pitched down. Pitch and tempo stay independent
- * under the hood (the app resamples them separately), so these presets just set
- * both knobs at once.
+ * Pitch is matched to speed so most presets behave like a natural speed change
+ * (like speeding up / slowing down a record): pitch in semitones = 12 * log2(speed).
+ * That keeps the resampling clean instead of producing chipmunk/underwater
+ * time-stretch artifacts. A few presets deliberately break the rule for effect.
  */
 object TempoPresets {
 
@@ -21,12 +20,19 @@ object TempoPresets {
 
     val presets: List<Preset> = listOf(
         Preset("Normal", 1.0f, 0f),
-        Preset("Nightcore", 1.25f, 2f),
-        Preset("Deep", 0.85f, -2f),
-        Preset("Daycore", 0.8f, -3f),
-        Preset("Vaporwave", 0.85f, -4f),
-        Preset("Slowed", 0.7f, -1f),
-        Preset("Chipmunk", 1.25f, 7f),
+        // Natural: 12*log2(1.25) ≈ +3.9 st
+        Preset("Nightcore", 1.25f, 4f),
+        // Natural: 12*log2(0.85) ≈ -2.8 st
+        Preset("Deep", 0.85f, -3f),
+        // Natural: 12*log2(0.80) ≈ -3.9 st
+        Preset("Daycore", 0.80f, -4f),
+        // Slowed with an extra pitch-down for the dreamy vaporwave wash.
+        Preset("Vaporwave", 0.80f, -5f),
+        // Natural: 12*log2(0.70) ≈ -6.2 st
+        Preset("Slowed", 0.70f, -6f),
+        // Comedy effect: a full octave up.
+        Preset("Chipmunk", 1.25f, 12f),
+        // Tempo-only: faster without changing the key.
         Preset("Fast", 1.5f, 0f),
     )
 

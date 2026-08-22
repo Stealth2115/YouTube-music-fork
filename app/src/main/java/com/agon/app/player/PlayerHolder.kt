@@ -49,6 +49,8 @@ object PlayerHolder {
                 /* handleAudioFocus = */ true
             )
             .setHandleAudioBecomingNoisy(true)
+            // Keep the network (and CPU) alive while streaming YouTube audio.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             // Local files keep using the default pipeline; `ytstream://` items get their
             // real progressive URL resolved on the loading thread just before opening.
             .setMediaSourceFactory(

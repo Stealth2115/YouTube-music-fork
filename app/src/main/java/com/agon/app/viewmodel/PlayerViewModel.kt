@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.util.Log
 import androidx.compose.runtime.derivedStateOf
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -1141,7 +1142,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun startService() {
         runCatching {
             val ctx = getApplication<Application>()
-            ctx.startService(Intent(ctx, PlaybackService::class.java))
+            ContextCompat.startForegroundService(ctx, Intent(ctx, PlaybackService::class.java))
         }
     }
 
