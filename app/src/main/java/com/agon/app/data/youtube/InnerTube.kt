@@ -190,10 +190,11 @@ internal object InnerTube {
      * Player endpoint. Returns the raw InnerTube responses in priority order; the caller
      * walks the list and uses the first response with a playable audio URL.
      *
-     * When [authToken] is set (the user signed in with Google), requests are sent with the
-     * OAuth bearer token so sign-in-gated tracks become playable.
+     * The player is always sent anonymously: visionOS is an anonymous client that rejects
+     * OAuth bearer auth with HTTP 400. The account token is only used for library/browse
+     * endpoints ([browseAuthed]), not for stream resolution.
      */
-    fun playerResponses(videoId: String, authToken: String? = null): List<PlayerResponse> {
+    fun playerResponses(videoId: String): List<PlayerResponse> {
         val out = ArrayList<PlayerResponse>(PLAYER_CLIENTS.size)
         for (client in PLAYER_CLIENTS) {
             val body = buildJsonObject {
@@ -202,7 +203,7 @@ internal object InnerTube {
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             }
-            postPlayer(client.baseUrl + "player?prettyPrint=false", body, client, authToken)
+            postPlayer(client.baseUrl + "player?prettyPrint=false", body, client)
                 ?.let { out.add(PlayerResponse(client.key, it)) }
         }
         return out
@@ -268,7 +269,6 @@ internal object InnerTube {
         url: String,
         body: JsonObject,
         client: PlayerClient,
-        authToken: String?,
     ): JsonObject? {
         var conn: HttpURLConnection? = null
         return try {
@@ -294,10 +294,6 @@ internal object InnerTube {
                 // Fresh anonymous session token (fetched from a browse response); a stale or
                 // handmade token makes the player endpoint reject the request outright.
                 visitorData()?.let { setRequestProperty("X-Goog-Visitor-Id", it) }
-                if (authToken != null) {
-                    setRequestProperty("Authorization", "Bearer $authToken")
-                    setRequestProperty("X-Goog-AuthUser", "0")
-                }
             }
             conn.outputStream.use { it.write(payload) }
             val code = conn.responseCode

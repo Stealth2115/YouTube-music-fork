@@ -23,10 +23,6 @@ class YouTubeRepository {
     private val albumCache = LruCache<String, List<YtTrack>>(16)
     private val streamCache = LruCache<String, StreamResult.Success>(48)
 
-    /** OAuth access token of the signed-in account, used for authenticated player requests. */
-    @Volatile
-    var authToken: String? = null
-
     // Per-video client fallback: when a resolved stream URL fails during playback, the
     // client that produced it is marked failed so the next resolution uses a new client.
     private val failedClientIds = LruCache<String, MutableSet<String>>(128)
@@ -107,7 +103,7 @@ class YouTubeRepository {
         var lastReason = "This track can't be played"
         var gotAnyResponse = false
         var okButNoUrl = false
-        for (pr in InnerTube.playerResponses(videoId, authToken)) {
+        for (pr in InnerTube.playerResponses(videoId)) {
             if (pr.key in failedClientIds[videoId].orEmpty()) {
                 Log.d(TAG, "resolve $videoId: skipping previously failed client ${pr.key}")
                 continue

@@ -1021,7 +1021,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         ytSignedIn = false
         ytLikedSongs = emptyList()
         ytPlaylists = emptyList()
-        youtube.authToken = null
         toast("Signed out of YouTube Music")
     }
 
@@ -1039,7 +1038,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             var failed = false
-            youtube.authToken = token
             val liked = runCatching { youtube.likedSongs(token) }
                 .onFailure { failed = true }
                 .getOrDefault(emptyList())
@@ -1072,7 +1070,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 toast("Sign in to YouTube Music first")
                 return@launch
             }
-            youtube.authToken = token
             val tracks = runCatching { load(token) }.getOrDefault(emptyList())
             ytLoadingCollection = false
             if (tracks.isEmpty()) toast("Nothing playable in $label")
