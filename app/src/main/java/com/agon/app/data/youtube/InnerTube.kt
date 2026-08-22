@@ -23,6 +23,7 @@ import java.util.zip.GZIPInputStream
 internal object InnerTube {
 
     private const val MUSIC_BASE = "https://music.youtube.com/youtubei/v1/"
+    private const val WWW_BASE = "https://www.youtube.com/youtubei/v1/"
 
     /** Public client key embedded in the music.youtube.com web page (not a Data API key). */
     private const val WEB_REMIX_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
@@ -51,6 +52,38 @@ internal object InnerTube {
     private const val MAX_RESPONSE_BYTES = 6 * 1024 * 1024
 
     val json: Json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    @Volatile
+    private var cachedVisitorData: String? = null
+
+    @Volatile
+    private var lastPlayerFailure: String? = null
+
+    /**
+     * Fetches a fresh anonymous visitorData token. Every InnerTube browse response returns
+     * one in `responseContext.visitorData`; the player endpoint rejects stale/handmade
+     * tokens, so the reference clients fetch this instead of hardcoding it.
+     */
+    fun visitorData(): String? {
+        cachedVisitorData?.let { return it }
+        synchronized(this) {
+            cachedVisitorData?.let { return it }
+            val fetched = runCatching {
+                val body = buildJsonObject {
+                    put("context", musicContext())
+                    put("browseId", "FEmusic_home")
+                }
+                val url = MUSIC_BASE + "browse?key=" + WEB_REMIX_KEY + "&prettyPrint=false"
+                post(url, body, WEB_REMIX_NAME, WEB_REMIX_VERSION, WEB_REMIX_UA, music = true)
+                    ?.obj("responseContext")?.str("visitorData")
+            }.getOrNull()
+            cachedVisitorData = fetched
+            return fetched
+        }
+    }
+
+    /** Human-readable reason the last player request failed, or null if it succeeded. */
+    fun lastPlayerFailure(): String? = lastPlayerFailure
 
     /** Search filter params understood by music.youtube.com (stable, public values). */
     object SearchFilter {
@@ -119,9 +152,13 @@ internal object InnerTube {
     }
 
     private data class PlayerClient(
+        val key: String,
         val clientId: String,
         val version: String,
         val userAgent: String,
+        val baseUrl: String,
+        val origin: String,
+        val referer: String,
         val context: () -> JsonObject,
     )
 
@@ -129,13 +166,23 @@ internal object InnerTube {
      * Player clients tried in priority order. visionOS is the only anonymous client that
      * returns plain, un-ciphered progressive stream URLs without a proof-of-origin token
      * or a JS signature runtime (yt-dlp's `_DEFAULT_JSLESS_CLIENTS = ('visionos',)`).
-     * The other mobile/TV clients have been retired by YouTube for anonymous playback.
+     * Both API hosts are tried because yt-dlp targets www.youtube.com while the music
+     * clients target music.youtube.com; one can be reachable when the other is blocked.
      */
     private val PLAYER_CLIENTS = listOf(
-        PlayerClient(VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA, ::visionOsContext),
+        PlayerClient(
+            "visionos-music", VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA,
+            MUSIC_BASE, "https://music.youtube.com", "https://music.youtube.com/",
+            ::visionOsContext,
+        ),
+        PlayerClient(
+            "visionos-web", VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA,
+            WWW_BASE, "https://www.youtube.com", "https://www.youtube.com/",
+            ::visionOsContext,
+        ),
     )
 
-    data class PlayerResponse(val clientId: String, val json: JsonObject)
+    data class PlayerResponse(val key: String, val json: JsonObject)
 
     val playerClientCount: Int get() = PLAYER_CLIENTS.size
 
@@ -155,8 +202,8 @@ internal object InnerTube {
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             }
-            postPlayer(MUSIC_BASE + "player?prettyPrint=false", body, client, authToken)
-                ?.let { out.add(PlayerResponse(client.clientId, it)) }
+            postPlayer(client.baseUrl + "player?prettyPrint=false", body, client, authToken)
+                ?.let { out.add(PlayerResponse(client.key, it)) }
         }
         return out
     }
@@ -241,12 +288,12 @@ internal object InnerTube {
                 setRequestProperty("X-Goog-Api-Format-Version", "1")
                 setRequestProperty("X-YouTube-Client-Name", client.clientId)
                 setRequestProperty("X-YouTube-Client-Version", client.version)
-                setRequestProperty("X-Origin", "https://music.youtube.com")
-                setRequestProperty("Origin", "https://music.youtube.com")
-                setRequestProperty("Referer", "https://music.youtube.com/")
-                // Anonymous session token used by the working InnerTune forks; keeps the
-                // player endpoint from returning an empty streamingData response.
-                setRequestProperty("X-Goog-Visitor-Id", "CgtsZG1ySnZiQWtSbyiMjuGSBg%3D%3D")
+                setRequestProperty("X-Origin", client.origin)
+                setRequestProperty("Origin", client.origin)
+                setRequestProperty("Referer", client.referer)
+                // Fresh anonymous session token (fetched from a browse response); a stale or
+                // handmade token makes the player endpoint reject the request outright.
+                visitorData()?.let { setRequestProperty("X-Goog-Visitor-Id", it) }
                 if (authToken != null) {
                     setRequestProperty("Authorization", "Bearer $authToken")
                     setRequestProperty("X-Goog-AuthUser", "0")
@@ -256,19 +303,30 @@ internal object InnerTube {
             val code = conn.responseCode
             if (code !in 200..299) {
                 val errBody = conn.errorStream?.use { it.readBounded() }?.take(300)
-                android.util.Log.w("InnerTube", "player ${client.clientId}: HTTP $code ${errBody.orEmpty()}")
+                lastPlayerFailure = "HTTP $code"
+                android.util.Log.w("InnerTube", "player ${client.key}: HTTP $code ${errBody.orEmpty()}")
                 return null
             }
             val text = conn.decodedStream().use { it.readBounded() }
             val parsed = json.parseToJsonElement(text) as? JsonObject
-            android.util.Log.d(
-                "InnerTube",
-                "player ${client.clientId}: OK, hasStreamingData=${parsed.obj("streamingData") != null}"
-            )
+            if (parsed == null) {
+                lastPlayerFailure = "bad response"
+                android.util.Log.w("InnerTube", "player ${client.key}: non-object response (${text.take(200)})")
+            } else {
+                lastPlayerFailure = null
+                android.util.Log.d(
+                    "InnerTube",
+                    "player ${client.key}: OK, hasStreamingData=${parsed.obj("streamingData") != null}"
+                )
+            }
             parsed
-        } catch (_: IOException) {
+        } catch (e: IOException) {
+            lastPlayerFailure = "network error"
+            android.util.Log.w("InnerTube", "player ${client.key}: IOException ${e.javaClass.simpleName}: ${e.message}")
             null
-        } catch (_: RuntimeException) {
+        } catch (e: RuntimeException) {
+            lastPlayerFailure = "bad response"
+            android.util.Log.w("InnerTube", "player ${client.key}: ${e.javaClass.simpleName}: ${e.message}")
             null
         } finally {
             conn?.disconnect()

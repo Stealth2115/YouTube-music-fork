@@ -108,15 +108,15 @@ class YouTubeRepository {
         var gotAnyResponse = false
         var okButNoUrl = false
         for (pr in InnerTube.playerResponses(videoId, authToken)) {
-            if (pr.clientId in failedClientIds[videoId].orEmpty()) {
-                Log.d(TAG, "resolve $videoId: skipping previously failed client ${pr.clientId}")
+            if (pr.key in failedClientIds[videoId].orEmpty()) {
+                Log.d(TAG, "resolve $videoId: skipping previously failed client ${pr.key}")
                 continue
             }
             gotAnyResponse = true
             val response = pr.json
             val status = response.obj("playabilityStatus")
             val state = status.str("status")
-            Log.d(TAG, "resolve $videoId (client ${pr.clientId}): playabilityStatus=$state")
+            Log.d(TAG, "resolve $videoId (client ${pr.key}): playabilityStatus=$state")
             if (state != null && state != "OK") {
                 lastReason = playabilityMessage(state, status)
                 continue
@@ -126,17 +126,19 @@ class YouTubeRepository {
                 // Playable status but no plain URL: the formats are encrypted (signatureCipher)
                 // or PO-token gated, which this client chain can't play.
                 okButNoUrl = true
-                Log.w(TAG, "resolve $videoId: client ${pr.clientId} OK but no playable URL (encrypted streams)")
+                Log.w(TAG, "resolve $videoId: client ${pr.key} OK but no playable URL (encrypted streams)")
                 continue
             }
-            Log.d(TAG, "resolve $videoId: client ${pr.clientId} produced a stream URL")
-            lastUsedClient.put(videoId, pr.clientId)
+            Log.d(TAG, "resolve $videoId: client ${pr.key} produced a stream URL")
+            lastUsedClient.put(videoId, pr.key)
             val success = StreamResult.Success(url, expiryOf(url, now))
             streamCache.put(videoId, success)
             return success
         }
         if (!gotAnyResponse) {
-            lastReason = "Couldn't reach YouTube"
+            lastReason = InnerTube.lastPlayerFailure()
+                ?.let { "Couldn't reach YouTube ($it)" }
+                ?: "Couldn't reach YouTube"
         } else if (okButNoUrl) {
             lastReason = "This track's stream is encrypted — sign in or update the app"
         }
