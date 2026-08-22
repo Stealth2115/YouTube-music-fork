@@ -28,41 +28,23 @@ internal object InnerTube {
     private const val WEB_REMIX_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
 
     private const val WEB_REMIX_NAME = "WEB_REMIX"
-    private const val WEB_REMIX_VERSION = "1.20241023.01.00"
+    private const val WEB_REMIX_VERSION = "1.20260707.12.00"
     private const val WEB_REMIX_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/129.0.0.0 Safari/537.36"
 
-    // Player client configs mirror the current (July 2026) yt-dlp client table - the most
-    // recent known-good versions. YouTube rejects older client versions with
-    // "no longer supported in this application or device", so these are updated together.
+    // Player client config mirrors the current (Aug 2026) official Metrolist/yt-dlp
+    // values. visionOS is the ONLY client that returns plain, un-ciphered progressive
+    // stream URLs without a proof-of-origin token or a JS signature runtime, which is
+    // exactly the fallback path the reference apps use for anonymous, no-JS playback.
+    // The other clients (ANDROID_VR, IOS, TV-embed) have been retired by YouTube for
+    // anonymous playback, so they are no longer used.
     private const val VISIONOS_NAME = "VISIONOS"
     private const val VISIONOS_VERSION = "1.02"
     private const val VISIONOS_CLIENT_ID = "101"
     private const val VISIONOS_UA =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
             "(KHTML, like Gecko) Version/26.0 Safari/605.1.15"
-
-    private const val ANDROID_VR_NAME = "ANDROID_VR"
-    private const val ANDROID_VR_VERSION = "1.65.10"
-    private const val ANDROID_VR_CLIENT_ID = "28"
-    private const val ANDROID_VR_UA =
-        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; " +
-            "eureka-user Build/SQ3A.220605.009.A1) gzip"
-
-    private const val IOS_NAME = "IOS"
-    private const val IOS_VERSION = "21.26.4"
-    private const val IOS_CLIENT_ID = "5"
-    private const val IOS_UA = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
-
-    // Embedded TV client: bypasses age-restriction for logged-out users. Some of its
-    // formats may be ciphered, so it is tried after the plain-URL clients.
-    private const val TV_EMBED_NAME = "TVHTML5_SIMPLY_EMBEDDED_PLAYER"
-    private const val TV_EMBED_VERSION = "2.0"
-    private const val TV_EMBED_CLIENT_ID = "85"
-    private const val TV_EMBED_UA =
-        "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 " +
-            "(KHTML, like Gecko) Version/15.4 Safari/605.1.15"
 
     private const val CONNECT_TIMEOUT_MS = 12_000
     private const val READ_TIMEOUT_MS = 15_000
@@ -88,35 +70,6 @@ internal object InnerTube {
         putJsonObject("user") { put("lockedSafetyMode", false) }
     }
 
-    private fun androidVrContext(): JsonObject = buildJsonObject {
-        putJsonObject("client") {
-            put("clientName", ANDROID_VR_NAME)
-            put("clientVersion", ANDROID_VR_VERSION)
-            put("deviceMake", "Oculus")
-            put("deviceModel", "Quest 3")
-            put("osName", "Android")
-            put("osVersion", "11")
-            put("androidSdkVersion", 30)
-            put("hl", "en")
-            put("gl", "US")
-            put("userAgent", ANDROID_VR_UA)
-        }
-    }
-
-    private fun iosContext(): JsonObject = buildJsonObject {
-        putJsonObject("client") {
-            put("clientName", IOS_NAME)
-            put("clientVersion", IOS_VERSION)
-            put("deviceMake", "Apple")
-            put("deviceModel", "iPhone16,2")
-            put("osName", "iPhone")
-            put("osVersion", "18.3.2.22D82")
-            put("hl", "en")
-            put("gl", "US")
-            put("userAgent", IOS_UA)
-        }
-    }
-
     private fun visionOsContext(): JsonObject = buildJsonObject {
         putJsonObject("client") {
             put("clientName", VISIONOS_NAME)
@@ -127,20 +80,6 @@ internal object InnerTube {
             put("osVersion", "26.5.23O471")
             put("hl", "en")
             put("gl", "US")
-            put("userAgent", VISIONOS_UA)
-        }
-    }
-
-    private fun tvEmbedContext(videoId: String): JsonObject = buildJsonObject {
-        putJsonObject("client") {
-            put("clientName", TV_EMBED_NAME)
-            put("clientVersion", TV_EMBED_VERSION)
-            put("hl", "en")
-            put("gl", "US")
-            put("userAgent", TV_EMBED_UA)
-        }
-        putJsonObject("thirdParty") {
-            put("embedUrl", "https://www.youtube.com/watch?v=$videoId")
         }
     }
 
@@ -183,15 +122,17 @@ internal object InnerTube {
         val clientId: String,
         val version: String,
         val userAgent: String,
-        val context: (String) -> JsonObject,
+        val context: () -> JsonObject,
     )
 
-    /** Player clients tried in priority order; the first one yielding a playable URL wins. */
+    /**
+     * Player clients tried in priority order. visionOS is the only anonymous client that
+     * returns plain, un-ciphered progressive stream URLs without a proof-of-origin token
+     * or a JS signature runtime (yt-dlp's `_DEFAULT_JSLESS_CLIENTS = ('visionos',)`).
+     * The other mobile/TV clients have been retired by YouTube for anonymous playback.
+     */
     private val PLAYER_CLIENTS = listOf(
-        PlayerClient(VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA, { visionOsContext() }),
-        PlayerClient(ANDROID_VR_CLIENT_ID, ANDROID_VR_VERSION, ANDROID_VR_UA, { androidVrContext() }),
-        PlayerClient(IOS_CLIENT_ID, IOS_VERSION, IOS_UA, { iosContext() }),
-        PlayerClient(TV_EMBED_CLIENT_ID, TV_EMBED_VERSION, TV_EMBED_UA, ::tvEmbedContext),
+        PlayerClient(VISIONOS_CLIENT_ID, VISIONOS_VERSION, VISIONOS_UA, ::visionOsContext),
     )
 
     data class PlayerResponse(val clientId: String, val json: JsonObject)
@@ -200,18 +141,16 @@ internal object InnerTube {
 
     /**
      * Player endpoint. Returns the raw InnerTube responses in priority order; the caller
-     * walks the list and uses the first response with a playable audio URL. visionOS is
-     * tried first because it returns plain, un-ciphered progressive stream URLs without
-     * requiring a proof-of-origin token or JavaScript signature deciphering.
+     * walks the list and uses the first response with a playable audio URL.
      *
      * When [authToken] is set (the user signed in with Google), requests are sent with the
-     * OAuth bearer token so age-restricted / sign-in-gated tracks become playable.
+     * OAuth bearer token so sign-in-gated tracks become playable.
      */
     fun playerResponses(videoId: String, authToken: String? = null): List<PlayerResponse> {
         val out = ArrayList<PlayerResponse>(PLAYER_CLIENTS.size)
         for (client in PLAYER_CLIENTS) {
             val body = buildJsonObject {
-                put("context", client.context(videoId))
+                put("context", client.context())
                 put("videoId", videoId)
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)

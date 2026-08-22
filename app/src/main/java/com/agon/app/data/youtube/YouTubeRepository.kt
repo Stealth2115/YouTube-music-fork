@@ -106,6 +106,7 @@ class YouTubeRepository {
 
         var lastReason = "This track can't be played"
         var gotAnyResponse = false
+        var okButNoUrl = false
         for (pr in InnerTube.playerResponses(videoId, authToken)) {
             if (pr.clientId in failedClientIds[videoId].orEmpty()) {
                 Log.d(TAG, "resolve $videoId: skipping previously failed client ${pr.clientId}")
@@ -120,14 +121,25 @@ class YouTubeRepository {
                 lastReason = playabilityMessage(state, status)
                 continue
             }
-            val url = pickAudioUrl(response) ?: continue
+            val url = pickAudioUrl(response)
+            if (url == null) {
+                // Playable status but no plain URL: the formats are encrypted (signatureCipher)
+                // or PO-token gated, which this client chain can't play.
+                okButNoUrl = true
+                Log.w(TAG, "resolve $videoId: client ${pr.clientId} OK but no playable URL (encrypted streams)")
+                continue
+            }
             Log.d(TAG, "resolve $videoId: client ${pr.clientId} produced a stream URL")
             lastUsedClient.put(videoId, pr.clientId)
             val success = StreamResult.Success(url, expiryOf(url, now))
             streamCache.put(videoId, success)
             return success
         }
-        if (!gotAnyResponse) lastReason = "Couldn't reach YouTube"
+        if (!gotAnyResponse) {
+            lastReason = "Couldn't reach YouTube"
+        } else if (okButNoUrl) {
+            lastReason = "This track's stream is encrypted — sign in or update the app"
+        }
         Log.w(TAG, "resolve $videoId: failed - $lastReason")
         return StreamResult.Unavailable(lastReason)
     }
