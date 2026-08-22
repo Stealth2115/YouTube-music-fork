@@ -47,6 +47,9 @@ class YouTubeAuth(private val context: Context) {
         val ACCESS = stringPreferencesKey("access_token")
         val REFRESH = stringPreferencesKey("refresh_token")
         val EXPIRES = longPreferencesKey("expires_at_ms")
+        val PENDING_CODE = stringPreferencesKey("pending_device_code")
+        val PENDING_USER = stringPreferencesKey("pending_user_code")
+        val PENDING_URL = stringPreferencesKey("pending_url")
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -98,7 +101,11 @@ class YouTubeAuth(private val context: Context) {
         var authorized = false
         while (true) {
             val response = postForm(TOKEN_URL, body)
-            if (response == null) break
+            if (response == null) {
+                // Transient network error: keep waiting (the caller bounds the total time).
+                delay(3_000L)
+                continue
+            }
             val access = response.str("access_token")
             if (access != null) {
                 val refresh = response.str("refresh_token")
@@ -132,6 +139,31 @@ class YouTubeAuth(private val context: Context) {
         val expiresIn = response.num("expires_in") ?: 3600L
         saveTokens(newAccess, refresh, System.currentTimeMillis() + expiresIn * 1000L)
         newAccess
+    }
+
+    /** A device-code flow that is still in progress (survives process death). */
+    data class PendingLogin(val deviceCode: String, val userCode: String, val url: String)
+
+    suspend fun savePendingLogin(code: String, user: String, url: String) {
+        context.ytAuthStore.edit {
+            it[K.PENDING_CODE] = code
+            it[K.PENDING_USER] = user
+            it[K.PENDING_URL] = url
+        }
+    }
+
+    suspend fun pendingLogin(): PendingLogin? = withContext(Dispatchers.IO) {
+        val p = context.ytAuthStore.data.first()
+        val code = p[K.PENDING_CODE] ?: return@withContext null
+        PendingLogin(code, p[K.PENDING_USER].orEmpty(), p[K.PENDING_URL].orEmpty())
+    }
+
+    suspend fun clearPendingLogin() {
+        context.ytAuthStore.edit {
+            it.remove(K.PENDING_CODE)
+            it.remove(K.PENDING_USER)
+            it.remove(K.PENDING_URL)
+        }
     }
 
     suspend fun signOut() {

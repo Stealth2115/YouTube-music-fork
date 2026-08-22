@@ -21,6 +21,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import com.agon.app.LoginService
 import com.agon.app.data.Album
 import com.agon.app.data.ArtistInfo
 import com.agon.app.data.LyricLine
@@ -296,9 +297,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         attachFx(player.audioSessionId)
         viewModelScope.launch { loadPrefs() }
         // Restore the YouTube Music sign-in state (if any) and pull the account library.
+        // If a device-code flow was still in progress when the process was killed, resume it.
         viewModelScope.launch {
             ytSignedIn = auth.isSignedIn()
-            if (ytSignedIn) loadYtLibrary()
+            if (ytSignedIn) {
+                loadYtLibrary()
+            } else {
+                val pending = auth.pendingLogin()
+                if (pending != null) {
+                    ytLoginUrl = pending.url
+                    ytLoginCode = pending.userCode
+                    startLoginService(pending.deviceCode)
+                    watchLoginResult()
+                }
+            }
         }
         // Position ticker — only runs while something is actually playing, so an idle
         // or paused app does no periodic work at all (battery + CPU).
@@ -945,6 +957,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var ytPlaylists by mutableStateOf<List<YtPlaylist>>(emptyList()); private set
     var ytLibraryLoading by mutableStateOf(false); private set
     private var ytAuthJob: Job? = null
+    private var ytWatchJob: Job? = null
 
     fun updateYtQuery(query: String) {
         ytQuery = query
@@ -982,7 +995,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- YouTube account ----------------
 
-    /** Starts the device-authorization sign-in flow. Progress shows in [ytLoginUrl]/[ytLoginCode]. */
+    /**
+     * Starts the device-authorization sign-in flow. The polling happens in a foreground
+     * service so it keeps running while the user approves the sign-in in their browser,
+     * instead of stopping when the app goes to the background.
+     */
     fun startYtLogin() {
         if (ytAuthBusy) return
         ytAuthBusy = true
@@ -995,26 +1012,69 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
             ytLoginUrl = device.verificationUrlComplete
             ytLoginCode = device.userCode
-            val ok = auth.pollForToken(device.deviceCode)
-            ytLoginUrl = null
-            ytLoginCode = null
+            auth.savePendingLogin(device.deviceCode, device.userCode, device.verificationUrlComplete)
+            startLoginService(device.deviceCode)
             ytAuthBusy = false
-            if (ok) {
-                ytSignedIn = true
-                toast("Signed in to YouTube Music")
-                loadYtLibrary()
-            } else {
-                toast("Sign-in was cancelled or expired")
-            }
+            watchLoginResult()
         }
     }
 
     fun cancelYtLogin() {
         ytAuthJob?.cancel()
         ytAuthJob = null
+        ytWatchJob?.cancel()
+        ytWatchJob = null
+        stopLoginService()
+        viewModelScope.launch { auth.clearPendingLogin() }
         ytLoginUrl = null
         ytLoginCode = null
         ytAuthBusy = false
+    }
+
+    /** Polls the stored sign-in state while the foreground service performs the token flow. */
+    private fun watchLoginResult() {
+        ytWatchJob?.cancel()
+        ytWatchJob = viewModelScope.launch {
+            while (isActive) {
+                if (auth.isSignedIn()) {
+                    auth.clearPendingLogin()
+                    stopLoginService()
+                    ytLoginUrl = null
+                    ytLoginCode = null
+                    if (!ytSignedIn) {
+                        ytSignedIn = true
+                        toast("Signed in to YouTube Music")
+                        loadYtLibrary()
+                    }
+                    return@launch
+                }
+                if (auth.pendingLogin() == null) {
+                    // The service finished (denied / expired) without storing tokens.
+                    ytLoginUrl = null
+                    ytLoginCode = null
+                    toast("Sign-in was cancelled or expired")
+                    return@launch
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun startLoginService(deviceCode: String) {
+        runCatching {
+            val ctx = getApplication<Application>()
+            ContextCompat.startForegroundService(
+                ctx,
+                Intent(ctx, LoginService::class.java).putExtra(LoginService.EXTRA_DEVICE_CODE, deviceCode)
+            )
+        }
+    }
+
+    private fun stopLoginService() {
+        runCatching {
+            val ctx = getApplication<Application>()
+            ctx.stopService(Intent(ctx, LoginService::class.java))
+        }
     }
 
     fun signOutYt() {
