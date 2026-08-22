@@ -46,10 +46,12 @@ fun YouTubeLoginDialog(vm: PlayerViewModel) {
     val code = vm.ytLoginCode.orEmpty()
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
 
-    // Open the browser automatically so the user only has to type the code.
+    // Open the browser automatically and copy the code to the clipboard, so the user only
+    // has to paste it (or pick their account if the code came pre-filled in the URL).
     LaunchedEffect(code) {
         if (code.isNotEmpty()) {
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            clipboard?.setPrimaryClip(ClipData.newPlainText("YouTube Music sign-in code", code))
         }
     }
 
@@ -59,12 +61,12 @@ fun YouTubeLoginDialog(vm: PlayerViewModel) {
         text = {
             Column {
                 Text(
-                    "Google opens in your browser and gives you a one-time code \u2014 your password never touches this app.",
+                    "Your browser opened automatically and the code was copied \u2014 just paste it there (or it's already filled in) and choose your account. Your password never touches this app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(14.dp))
-                Text("1. Open the link", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text("If the browser didn't open", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Text(
                     url,
                     color = MaterialTheme.colorScheme.primary,
@@ -74,7 +76,7 @@ fun YouTubeLoginDialog(vm: PlayerViewModel) {
                         .padding(vertical = 4.dp),
                 )
                 Spacer(Modifier.height(10.dp))
-                Text("2. Enter this code", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text("Code (copied to clipboard)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Text(
                     code,
                     style = MaterialTheme.typography.headlineMedium,

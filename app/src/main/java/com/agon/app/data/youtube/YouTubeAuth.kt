@@ -55,6 +55,8 @@ class YouTubeAuth(private val context: Context) {
         val deviceCode: String,
         val userCode: String,
         val verificationUrl: String,
+        /** URL with the code pre-filled, so the user doesn't have to type it. */
+        val verificationUrlComplete: String,
         val expiresInSec: Long,
         val intervalSec: Long,
     )
@@ -68,10 +70,21 @@ class YouTubeAuth(private val context: Context) {
         val body = "client_id=${enc(CLIENT_ID)}&scope=${enc(SCOPE)}"
         val response = postForm(DEVICE_CODE_URL, body) ?: return@withContext null
         val deviceCode = response.str("device_code") ?: return@withContext null
+        val userCode = response.str("user_code").orEmpty()
+        val verificationUrl = response.str("verification_url").orEmpty()
+        // Google sometimes returns a verification_uri_complete; when it doesn't, build the
+        // equivalent so the browser opens with the code already filled in.
+        val complete = response.str("verification_uri_complete")
+            ?: if (verificationUrl.isNotEmpty() && userCode.isNotEmpty()) {
+                "$verificationUrl?user_code=${enc(userCode)}"
+            } else {
+                verificationUrl
+            }
         DeviceCode(
             deviceCode = deviceCode,
-            userCode = response.str("user_code").orEmpty(),
-            verificationUrl = response.str("verification_url").orEmpty(),
+            userCode = userCode,
+            verificationUrl = verificationUrl,
+            verificationUrlComplete = complete,
             expiresInSec = response.num("expires_in") ?: 1800L,
             intervalSec = response.num("interval") ?: 5L,
         )

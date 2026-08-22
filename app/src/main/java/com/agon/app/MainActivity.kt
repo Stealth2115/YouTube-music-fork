@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,6 +55,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.agon.app.ui.components.AnimatedSplash
 import com.agon.app.ui.components.MiniPlayer
 import com.agon.app.ui.components.YouTubeLoginDialog
 import com.agon.app.ui.screens.EqualizerScreen
@@ -92,9 +94,17 @@ fun RedlineApp(vm: PlayerViewModel) {
     val context = LocalContext.current
     var granted by remember { mutableStateOf(hasAudioPermission(context)) }
     LaunchedEffect(granted) { if (granted) vm.onPermissionGranted() }
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        AnimatedContent(targetState = granted, label = "gate") { ok ->
-            if (ok) MainScaffold(vm) else PermissionScreen(onGranted = { granted = true })
+
+    var showSplash by rememberSaveable { mutableStateOf(true) }
+
+    Box(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            AnimatedContent(targetState = granted, label = "gate") { ok ->
+                if (ok) MainScaffold(vm) else PermissionScreen(onGranted = { granted = true })
+            }
+        }
+        AnimatedVisibility(visible = showSplash, exit = fadeOut(tween(350))) {
+            AnimatedSplash { showSplash = false }
         }
     }
 }

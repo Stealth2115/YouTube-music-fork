@@ -993,7 +993,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 toast("Couldn't start sign-in \u2014 check your connection")
                 return@launch
             }
-            ytLoginUrl = device.verificationUrl
+            ytLoginUrl = device.verificationUrlComplete
             ytLoginCode = device.userCode
             val ok = auth.pollForToken(device.deviceCode)
             ytLoginUrl = null
