@@ -2,6 +2,7 @@ package com.agon.app.ui.components
 
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,7 +38,23 @@ fun MiniPlayer(vm: PlayerViewModel, onOpen: () -> Unit) {
     val song = vm.currentSong ?: return
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            // Swipe up to open the fullscreen player.
+            .pointerInput(Unit) {
+                var swipedUp = false
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, amount ->
+                        if (amount < 0f) {
+                            swipedUp = true
+                            change.consume()
+                        }
+                    },
+                    onDragEnd = { if (swipedUp) onOpen() },
+                    onDragCancel = { swipedUp = false },
+                )
+            },
     ) {
         Column {
             val progress = if (vm.durationMs > 0) (vm.positionMs.toFloat() / vm.durationMs).coerceIn(0f, 1f) else 0f

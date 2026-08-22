@@ -65,6 +65,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.7")
 
     implementation("androidx.core:core-ktx:1.15.0")
+    // Android 12+ splash screen (backported to older versions).
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     // Required at runtime so Coil can load remote (YouTube) artwork over https.

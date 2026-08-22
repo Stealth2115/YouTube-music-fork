@@ -2,6 +2,7 @@ package com.agon.app.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -17,6 +18,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -87,6 +90,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -98,6 +102,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -117,6 +122,7 @@ import com.agon.app.ui.components.pitchLabel
 import com.agon.app.viewmodel.PlayerViewModel
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 @Composable
 fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: () -> Unit) {
@@ -134,9 +140,32 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
     var showQueueSheet by remember { mutableStateOf(false) }
     var playlistTarget by remember { mutableStateOf<Song?>(null) }
 
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val dragY = remember { Animatable(0f) }
+    val dragX = remember { Animatable(0f) }
+
     Column(
         Modifier
             .fillMaxSize()
+            // Swipe down to dismiss the fullscreen player. Disabled while lyrics are shown
+            // so the lyrics list can scroll freely.
+            .graphicsLayer { translationY = dragY.value }
+            .pointerInput(showLyrics) {
+                if (showLyrics) return@pointerInput
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        scope.launch { dragY.snapTo((dragY.value + amount).coerceAtLeast(0f)) }
+                    },
+                    onDragEnd = {
+                        val threshold = with(density) { 150.dp.toPx() }
+                        if (dragY.value > threshold) onClose()
+                        else scope.launch { dragY.animateTo(0f, tween(180)) }
+                    },
+                    onDragCancel = { scope.launch { dragY.animateTo(0f, tween(180)) } },
+                )
+            }
             .background(
                 // Fully opaque so nothing behind the player shows through. The accent is
                 // composited over the background instead of layered with alpha.
@@ -212,7 +241,36 @@ fun NowPlayingScreen(vm: PlayerViewModel, onClose: () -> Unit, onOpenEqualizer: 
             contentAlignment = Alignment.Center,
         ) {
             Crossfade(targetState = showLyrics, label = "artLyrics") { ly ->
-                if (ly) LyricsPanel(vm) else ArtworkBlock(song, vm.isPlaying, accent)
+                if (ly) {
+                    LyricsPanel(vm)
+                } else {
+                    // Swipe the artwork left for the next song, right for the previous one.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { translationX = dragX.value }
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { change, amount ->
+                                        change.consume()
+                                        scope.launch { dragX.snapTo(dragX.value + amount) }
+                                    },
+                                    onDragEnd = {
+                                        val threshold = with(density) { 80.dp.toPx() }
+                                        when {
+                                            dragX.value <= -threshold -> vm.next()
+                                            dragX.value >= threshold -> vm.previous()
+                                        }
+                                        scope.launch { dragX.animateTo(0f, tween(200)) }
+                                    },
+                                    onDragCancel = { scope.launch { dragX.animateTo(0f, tween(200)) } },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ArtworkBlock(song, vm.isPlaying, accent)
+                    }
+                }
             }
         }
 
